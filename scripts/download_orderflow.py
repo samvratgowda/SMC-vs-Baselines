@@ -13,12 +13,18 @@ time and condensed right away into:
     data/MES_vap_1m.parquet   volume at each price, per minute
 
 so the raw trades never have to fit in memory or on disk.
+
+Each condensed week is also saved under data/of_weeks/ as soon as it arrives.
+If the download stops partway (a timeout, a closed laptop), run the same
+command again: weeks already saved are skipped and NOT downloaded or billed
+again. Only the missing weeks are priced and fetched.
 """
 from __future__ import annotations
 
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -36,6 +42,26 @@ def weeks(start: str, end: str):
     sats = pd.date_range(t0.normalize(), t1, freq="W-SAT")
     edges = sorted({t0, t1, *[e for e in sats if t0 < e < t1]})
     return list(zip(edges[:-1], edges[1:]))
+
+
+def months(start: str, end: str):
+    t0, t1 = pd.Timestamp(start, tz="UTC"), pd.Timestamp(end, tz="UTC")
+    firsts = pd.date_range(t0.normalize(), t1, freq="MS")
+    edges = sorted({t0, t1, *[e for e in firsts if t0 < e < t1]})
+    return list(zip(edges[:-1], edges[1:]))
+
+
+def retry(fn, what: str, tries: int = 5):
+    """Databento sometimes answers large trade-data requests with a 504 timeout; wait and retry."""
+    for k in range(tries):
+        try:
+            return fn()
+        except Exception as e:                      # BentoServerError and network errors
+            if k == tries - 1 or "4" in str(getattr(e, "http_status", ""))[:1]:
+                raise
+            wait = 10 * (k + 1)
+            print(f"    {what}: {str(e).splitlines()[0][:80]} - retrying in {wait}s")
+            time.sleep(wait)
 
 
 def main() -> int:
@@ -58,33 +84,52 @@ def main() -> int:
         return 1
     client = db.Historical(key)
 
-    cost = client.metadata.get_cost(dataset=DATASET, symbols=[args.symbol], schema=SCHEMA,
-                                    stype_in="continuous", start=args.start, end=args.end)
-    print(f"{args.symbol} trades {args.start} -> {args.end}: ${cost:,.2f}")
+    out = Path(args.out)
+    chunks = out / "of_weeks"
+    chunks.mkdir(parents=True, exist_ok=True)
+    root = args.symbol.split(".")[0]
+    chunk = lambda a, kind: chunks / f"{root}_{a:%Y%m%d%H%M}_{kind}.parquet"
+    todo = [(a, b) for a, b in weeks(args.start, args.end)
+            if not (chunk(a, "bars").exists() and chunk(a, "vap").exists())]
+    done = len(weeks(args.start, args.end)) - len(todo)
+    if done:
+        print(f"{done} week(s) already downloaded in {chunks}/ - skipped, not billed again.")
+
+    # Price week by week (only weeks still missing): one request for many
+    # months of trades can time out (504).
+    cost = 0.0
+    for a, b in todo:
+        cost += retry(lambda: client.metadata.get_cost(dataset=DATASET, symbols=[args.symbol], schema=SCHEMA,
+                                                       stype_in="continuous", start=a, end=b), f"price {a:%Y-%m-%d}")
+    print(f"{args.symbol} trades {args.start} -> {args.end}: ${cost:,.2f} for {len(todo)} week(s) still to download")
     if not args.yes and input("Download? [y/N] ").strip().lower() != "y":
         print("Cancelled.")
         return 0
 
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-    all_bars, all_vap = [], []
-    for a, b in weeks(args.start, args.end):
-        store = client.timeseries.get_range(dataset=DATASET, symbols=[args.symbol], schema=SCHEMA,
-                                            stype_in="continuous", start=a, end=b)
+    for a, b in todo:
+        store = retry(lambda: client.timeseries.get_range(dataset=DATASET, symbols=[args.symbol], schema=SCHEMA,
+                                                          stype_in="continuous", start=a, end=b), f"week {a:%Y-%m-%d}")
         df = store.to_df()
         if df.empty:
             print(f"  {a:%Y-%m-%d}: no trades")
+            pd.DataFrame().to_parquet(chunk(a, "bars"))
+            pd.DataFrame().to_parquet(chunk(a, "vap"))
             continue
         if "ts_event" not in df.columns:
             df = df.reset_index().rename(columns={df.index.name or "index": "ts_event"})
         bars, vap = aggregate_trades(df[["ts_event", "price", "size", "side", "instrument_id"]])
-        all_bars.append(bars)
-        all_vap.append(vap)
+        bars.to_parquet(chunk(a, "bars"))           # saved right away: a crash later costs nothing
+        vap.to_parquet(chunk(a, "vap"))
         print(f"  {a:%Y-%m-%d}: {len(df):,} trades -> {len(bars):,} minutes")
         del df, store
-    if not all_bars:
+    # Combine every saved week in the requested range.
+    parts = [(chunk(a, "bars"), chunk(a, "vap")) for a, _ in weeks(args.start, args.end)]
+    parts = [(pb, pv) for pb, pv in parts if pb.exists() and pv.exists()]
+    if not parts:
         print("No data downloaded.")
         return 1
+    all_bars = [pd.read_parquet(pb) for pb, _ in parts]
+    all_vap = [pd.read_parquet(pv) for _, pv in parts]
     bars = pd.concat(all_bars).sort_index()
     bars = bars[~bars.index.duplicated(keep="last")]
     vap = pd.concat(all_vap, ignore_index=True)
