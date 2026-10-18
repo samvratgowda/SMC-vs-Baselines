@@ -1,4 +1,4 @@
-"""The SMC strategy: a Smart Money Concepts model built from the Inner Circle
+"""The SMC strategy (ICT model): a Smart Money Concepts model built from the Inner Circle
 Trader's (ICT) concepts, coded step by step. Runs on 1-minute bars.
 
     1. Bias       4-hour market structure: trade only in its direction
@@ -82,7 +82,7 @@ def _on_1m(n: int, avail: np.ndarray, values: np.ndarray) -> np.ndarray:
 
 
 class SMCStrategy(Strategy):
-    name = "SMC strategy"
+    name = "SMC: ICT model"
     tag = "smc"
     funnel_keys = ["Liquidity sweeps", "5m order-flow shift (BOS/IFVG)", "Pulled back into FVG/EQ",
                    "Invalidated: new extreme before entry", "1m entry confirmation", "Outside entry window",

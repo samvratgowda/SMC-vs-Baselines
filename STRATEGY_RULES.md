@@ -1,4 +1,4 @@
-# SMC strategy: the rules, and where each comes from
+# SMC (ICT model): the rules, and where each comes from
 
 The SMC side of this project is one strategy: a Smart Money Concepts model
 built from the Inner Circle Trader's (ICT) concepts, coded step by step: a

@@ -6,7 +6,7 @@ Examples:
     python run_backtest.py --set smc.use_bias=false --set sma.allow_shorts=false
     python run_backtest.py --synthetic                      # random-walk data, checks the pipeline
 
---set prefixes: smc. (SMC strategy), of. (order flow, Fabio model), sma. (SMA + RSI(2)).
+--set prefixes: smc. (SMC: ICT model), of. (order flow, Fabio model), sma. (SMA + RSI(2)).
 The order-flow strategy runs automatically when data/MES_of_1m.parquet exists
 (scripts/download_orderflow.py); the report then also compares all strategies
 over the order-flow data's dates.
@@ -32,7 +32,7 @@ from backtest.strategies import BuyHoldStrategy, SMARSIConfig, SMARSIStrategy, S
 from backtest.strategies.orderflow import FabioConfig, FabioStrategy
 
 # Palette slots 1-3 (validated together); text stays in neutral ink.
-COLORS = {"SMC strategy": "#2a78d6", "Order flow: Fabio model": "#6250d6",
+COLORS = {"SMC: ICT model": "#2a78d6", "Order flow: Fabio model": "#6250d6",
           "SMA + RSI(2) (Connors)": "#eb6834", "Buy & hold": "#1baf7a"}
 OF_WINDOW = "Order-flow window"
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"

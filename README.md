@@ -24,7 +24,7 @@ TradingView's free plan only loads about 18 trading days of 5-minute bars.
 ## Results
 
 **Short answer: no.** On MES futures, the entry signals of both the SMC
-strategy and the order-flow (Fabio) model did no better than random
+(ICT) model and the order-flow (Fabio) model did no better than random
 entries with the same stops, targets and costs, and both lost money.
 Buy-and-hold had the highest return. The only active strategy that held up
 was the simplest: Connors' RSI(2), with a lower return than buy-and-hold but
@@ -36,7 +36,7 @@ a similar Sharpe ratio and about a third of the drawdown.
 |---|---|---|---|---|---|---|
 | **Buy & hold** | Jan 2021 – Oct 2026 | 1 | – | **+76.9%** | 0.69 | −23.7% |
 | SMA + RSI(2) (Connors) | Jan 2021 – Oct 2026 | 63 | – | +25.7% | **0.74** | **−8.5%** |
-| SMC strategy | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −54.5% | −0.43 | −65.0% |
+| SMC: ICT model | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −54.5% | −0.43 | −65.0% |
 | Order flow: Fabio model | Apr 2026 – Oct 2026 | 124 | −0.46 (−0.76 to −0.14) | −12.0% | −3.57 | −13.4% |
 
 - **R** is a trade's profit divided by the amount it risked. The 95%
@@ -58,7 +58,7 @@ period and entry window (08:00–11:00 ET), with the same exit time, costs, and
 stop and target sizes (drawn from the model's own trades), but on random days
 and minutes in a random direction.
 
-| | SMC strategy | Order flow: Fabio model |
+| | SMC: ICT model | Order flow: Fabio model |
 |---|---|---|
 | Strategy avg R | −0.08 | −0.46 |
 | Random runs: median avg R | −0.08 | −0.31 |
@@ -73,7 +73,7 @@ and minutes in a random direction.
   costs, not its signals. The signals did slightly worse than the median
   random run, but well inside the random range: no evidence they help or hurt.
 
-### SMC strategy
+### SMC: ICT model
 
 | | Trades | Avg R (95% CI) | Return | Sharpe |
 |---|---|---|---|---|
@@ -175,7 +175,7 @@ April 5 – October 16, 2026, the period covered by the order-flow data:
 | **Buy & hold** | **+16.2%** | **1.94** | −5.1% | 0 | – |
 | SMA + RSI(2) (Connors) | +4.4% | 1.54 | −1.8% | 8 | – |
 | Order flow: Fabio model | −12.0% | −3.57 | −13.4% | 124 | −0.46 |
-| SMC strategy | −17.4% | −1.17 | −27.9% | 42 | −0.21 |
+| SMC: ICT model | −17.4% | −1.17 | −27.9% | 42 | −0.21 |
 
 ![The same six months for all four strategies, each restarted at $100k](docs/equity_orderflow_window.png)
 
@@ -196,8 +196,58 @@ April 5 – October 16, 2026, the period covered by the order-flow data:
   in Taiwan, under 1% earned reliable profits after fees
   ([Barber, Lee, Liu & Odean, 2014](https://ideas.repec.org/a/eee/finmar/v18y2014icp1-24.html)).
 
-<!-- TODO: add 2-3 hand-checked trades here: a TradingView screenshot of each with the
-     sweep, entry, stop and target marked, saved as docs/trade1.png etc. -->
+### Hand-checked trades
+
+Three trades from after the September 2026 contract roll, checked by eye on
+TradingView's MES1! chart, which uses a different data vendor than Databento.
+Prices since that roll are identical in both, because back-adjustment only
+shifts older prices. Times are New York time; the yellow lines and position
+boxes were drawn by hand from the backtest's trade list.
+
+**1. SMC: ICT model, short, Oct 15 2026: target hit (+2.14R)**
+
+![SMC short on Oct 15 2026, 1-minute chart](docs/trade1.png)
+
+The 07:37 candle trades up to 7756.00 (yellow line), sweeping the Asia-session
+high. Price then breaks down through an earlier fair value gap (the 5-minute
+inverse FVG at 07:59), pulls back into the new bearish gap near 7746.50 without
+reaching the stop, and the 1-minute confirmation triggers a short at 08:28 at
+7748.00. Stop 7756.00 at the sweep high; target 7730.50, the latest hourly
+swing low. Price reaches the target at 08:30, as in the backtest.
+
+**2. SMC: ICT model, long, Oct 8 2026: stopped out (−1.02R)**
+
+![SMC long on Oct 8 2026, 5-minute chart](docs/trade2.png)
+
+The previous day's low is swept at 06:25, with a low of 7802.50 (lower yellow
+line). Price shifts structure upward (5-minute inverse FVG at 07:49), pulls
+back into the bullish gap near 7828, and the 1-minute confirmation triggers a
+long at 09:35 at 7832.00. Stop 7802.50 at the sweep low; target 7884.50, the
+previous day's high (upper line). Price peaks near 7845 and falls through the
+stop at 13:00, as in the backtest.
+
+**3. Order flow: Fabio model, long, Oct 5 2026: target hit (+8.0R)**
+
+![Order-flow long on Oct 5 2026, 5-minute chart](docs/trade3.png)
+
+The yellow lines are the previous trading day's value area (7762.00–7797.25).
+A 5-minute candle closes above the value-area high around 10:00 (trend model:
+out of balance). The impulse leg runs from 7765.00 to 7811.25; price pulls
+back into a low-volume node of that leg at 7803.25, and stacked buy imbalances
+on the 10:37 bar trigger a long at 10:38 at 7803.25. Stop 7799.25; target
+7835.75, the point of control of an earlier day's balance. Price reaches the
+target at 14:57.
+
+TradingView's position tool marks this trade as stopped out, because it counts
+the whole 10:35 five-minute bar, including the pullback low just before the
+10:38 entry. On 1-minute bars the backtest finds no trade below the stop after
+the entry; TradingView's free plan doesn't show 1-minute bars that far back,
+so that detail couldn't be checked by eye. The order-flow signal itself
+(stacked imbalances) isn't visible on a standard chart either.
+
+In screenshots 1 and 2 the target edge of the position box was drawn half a
+point off (7730.00 and 7884.00 instead of 7730.50 and 7884.50); this doesn't
+change either outcome.
 
 To reproduce: download the data (see Quick start), then
 `python run_backtest.py --split 2025-01-01`. The settings used are printed at
@@ -272,7 +322,7 @@ exploration, not as new rules.
 
 | | Entries | Stop | Target |
 |---|---|---|---|
-| **SMC strategy** | 1-minute bars. With the 4h bias, a previous-day / Asia / London / hourly low is swept; a 5m candle closes back through the latest swing or an inverse FVG; price pulls back into the new 5m FVG (or the move's 50%); a 1m break of structure or inverse FVG out of it triggers a market entry, 08:00–11:00 ET. | Sweep extreme | Nearest untaken liquidity ≥ 1R away |
+| **SMC: ICT model** | 1-minute bars. With the 4h bias, a previous-day / Asia / London / hourly low is swept; a 5m candle closes back through the latest swing or an inverse FVG; price pulls back into the new 5m FVG (or the move's 50%); a 1m break of structure or inverse FVG out of it triggers a market entry, 08:00–11:00 ET. | Sweep extreme | Nearest untaken liquidity ≥ 1R away |
 | **Order flow: Fabio model** | 1-minute order-flow bars. Balance = previous day's value area. Trend: a 5m close outside value, then a pullback into a low-volume node (LVN) of the impulse leg's volume profile. Mean reversion: a failed push outside value, a 5m close back inside, then a pullback into an LVN of the reclaim leg. Both need aggression at the LVN (a big aggressive order or 3+ stacked footprint imbalances); market entry, 08:00–11:00 ET. | 2 ticks beyond the aggression bar / LVN | Previous balance POC (trend) or balance POC (mean reversion), ≥ 1R |
 | **SMA + RSI(2) (Connors)** | Daily bars. Long when the close is above its 200-day SMA and RSI(2) < 10; short when below the 200-day SMA and RSI(2) > 90. Flat between trades. Sized at 100% of equity. From Connors & Alvarez, *Short Term Trading Strategies That Work* (2008); Pine version: `pine/sma_rsi_daily.pine`. | none | close back across the 5-day SMA |
 | **Buy & hold** | Buy at the start, hold to the end, roll each quarter. Sized so notional ≈ starting capital (no leverage). | none | none |
