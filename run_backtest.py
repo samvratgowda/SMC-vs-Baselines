@@ -1,12 +1,12 @@
-"""Run the SMC (TJR model) vs daily SMA + RSI vs buy-and-hold on MES and write a report.
+"""Run the SMC strategy, order-flow strategy, SMA + RSI(2) and buy-and-hold on MES and write a report.
 
 Examples:
     python run_backtest.py                                  # data/MES_1m.parquet
     python run_backtest.py --split 2025-01-01               # train before, test from this date
-    python run_backtest.py --set tjr.use_bias=false --set sma.allow_shorts=false
+    python run_backtest.py --set smc.use_bias=false --set sma.allow_shorts=false
     python run_backtest.py --synthetic                      # random-walk data, checks the pipeline
 
---set prefixes: tjr. (SMC, TJR model), of. (order flow, Fabio model), sma. (SMA + RSI).
+--set prefixes: smc. (SMC strategy), of. (order flow, Fabio model), sma. (SMA + RSI(2)).
 The order-flow strategy runs automatically when data/MES_of_1m.parquet exists
 (scripts/download_orderflow.py); the report then also compares all strategies
 over the order-flow data's dates.
@@ -28,17 +28,17 @@ from backtest.data import back_adjust, prepare, resample
 from backtest.engine import EngineConfig, run, trades_frame
 from backtest.metrics import split_results
 from backtest.orderflow import aggregate_trades, load_orderflow, prepare_orderflow
-from backtest.strategies import BuyHoldStrategy, SMARSIConfig, SMARSIStrategy, TJRConfig, TJRStrategy
+from backtest.strategies import BuyHoldStrategy, SMARSIConfig, SMARSIStrategy, SMCConfig, SMCStrategy
 from backtest.strategies.orderflow import FabioConfig, FabioStrategy
 
 # Palette slots 1-3 (validated together); text stays in neutral ink.
-COLORS = {"SMC: TJR model": "#2a78d6", "Order flow: Fabio model": "#6250d6",
+COLORS = {"SMC strategy": "#2a78d6", "Order flow: Fabio model": "#6250d6",
           "SMA + RSI(2) (Connors)": "#eb6834", "Buy & hold": "#1baf7a"}
 OF_WINDOW = "Order-flow window"
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 
 
-PREFIXES = ("tjr", "sma", "of")
+PREFIXES = ("smc", "sma", "of")
 
 
 def parse_sets(pairs: list[str], cfg_obj, prefix: str):
@@ -49,7 +49,7 @@ def parse_sets(pairs: list[str], cfg_obj, prefix: str):
         k, v = k.strip(), v.strip().strip('"').strip("'")
         pre, dot, k = k.partition(".")
         if not dot or pre not in PREFIXES:
-            raise SystemExit(f"--set {p}: use a prefix, e.g. tjr.use_bias=false ({', '.join(PREFIXES)})")
+            raise SystemExit(f"--set {p}: use a prefix, e.g. smc.use_bias=false ({', '.join(PREFIXES)})")
         if pre != prefix:
             continue
         if k not in fields:
@@ -181,14 +181,14 @@ def main(argv=None) -> int:
             of = (of[0][of[0].index < t1], of[1], of[2])
     split = pd.Timestamp(args.split, tz="America/New_York") if args.split else None
 
-    tjr_cfg = parse_sets(args.set, TJRConfig(), "tjr")
+    smc_cfg = parse_sets(args.set, SMCConfig(), "smc")
     ma_cfg = parse_sets(args.set, SMARSIConfig(), "sma")
     of_cfg = parse_sets(args.set, FabioConfig(), "of")
     eng = EngineConfig(intrabar=args.intrabar)
 
     roll_times = [r.time for r in rolls]
-    # The TJR model enters on 1-minute confirmations, so it runs on 1-minute bars.
-    runs = [(TJRStrategy(tjr_cfg), bars1), (SMARSIStrategy(ma_cfg, roll_times), bars), (BuyHoldStrategy(roll_times), bars)]
+    # The SMC strategy enters on 1-minute confirmations, so it runs on 1-minute bars.
+    runs = [(SMCStrategy(smc_cfg), bars1), (SMARSIStrategy(ma_cfg, roll_times), bars), (BuyHoldStrategy(roll_times), bars)]
     extra = {}
     if of is not None and len(of[0]) > 1:
         # Order flow runs on its own (usually shorter) data; every strategy is also
@@ -223,7 +223,7 @@ def main(argv=None) -> int:
     if args.control_runs > 0:
         from backtest.random_control import RandomTrades
         for s, data in runs:
-            if s.tag not in ("tjr", "orderflow"):
+            if s.tag not in ("smc", "orderflow"):
                 continue
             tf = trades_frame(results[s.name]["trades"])
             if len(tf) < 5:
@@ -246,7 +246,7 @@ def main(argv=None) -> int:
     lines.append("")
     lines.append("## Settings")
     lines.append("")
-    lines.append("```json\n" + json.dumps({"tjr": dataclasses.asdict(tjr_cfg), "of": dataclasses.asdict(of_cfg), "sma": dataclasses.asdict(ma_cfg)},
+    lines.append("```json\n" + json.dumps({"smc": dataclasses.asdict(smc_cfg), "of": dataclasses.asdict(of_cfg), "sma": dataclasses.asdict(ma_cfg)},
                                           indent=1, default=str) + "\n```")
     for period in ["Full", "Train", "Test", OF_WINDOW]:
         cols = [n for n in tables if period in tables[n]]

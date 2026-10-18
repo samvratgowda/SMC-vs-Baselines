@@ -2,18 +2,18 @@
 
 By Samvrat Gowda
 
-This project tests the Smart Money Concepts (SMC) day-trading model taught
-by TJR, the most-followed SMC trader online, and an order-flow model based on
+This project tests a Smart Money Concepts (SMC) day-trading strategy built
+from the Inner Circle Trader's (ICT) concepts, and an order-flow model based on
 Fabio Valentini's teaching, against two baselines: Larry Connors' RSI(2)
 strategy (the best-known SMA + RSI system) and buy-and-hold. A random-entry
 control checks whether each model's entry signals beat coin flips. All run on the same Micro E-mini S&P 500 (MES) data with
 the same costs.
 
-The SMC strategy follows TJR's sequence step by step: 4h bias → liquidity
+The SMC strategy codes this sequence step by step: 4h bias → liquidity
 sweep → 5m change in order flow → pullback into the FVG/equilibrium → 1m
 confirmation entry, stop at the sweep, target the next liquidity. Every rule
-and its source is in [`STRATEGY_RULES.md`](STRATEGY_RULES.md); where TJR
-leaves a rule open, the choice is marked and was fixed before any backtest on
+and its source is in [`STRATEGY_RULES.md`](STRATEGY_RULES.md); where the
+sources leave a rule open, the choice is marked and was fixed before any backtest on
 real data. The order-flow rules are in [`ORDERFLOW_RULES.md`](ORDERFLOW_RULES.md). Python is used instead of TradingView because
 TradingView's free plan only loads about 18 trading days of 5-minute bars.
 
@@ -24,7 +24,7 @@ TradingView's free plan only loads about 18 trading days of 5-minute bars.
 ## Results
 
 **Short answer: no.** On MES futures, the entry signals of both the SMC
-(TJR) model and the order-flow (Fabio) model did no better than random
+strategy and the order-flow (Fabio) model did no better than random
 entries with the same stops, targets and costs, and both lost money.
 Buy-and-hold had the highest return. The only active strategy that held up
 was the simplest: Connors' RSI(2), with a lower return than buy-and-hold but
@@ -36,7 +36,7 @@ a similar Sharpe ratio and about a third of the drawdown.
 |---|---|---|---|---|---|---|
 | **Buy & hold** | Jan 2021 – Oct 2026 | 1 | – | **+76.9%** | 0.69 | −23.7% |
 | SMA + RSI(2) (Connors) | Jan 2021 – Oct 2026 | 63 | – | +25.7% | **0.74** | **−8.5%** |
-| SMC: TJR model | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −54.5% | −0.43 | −65.0% |
+| SMC strategy | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −54.5% | −0.43 | −65.0% |
 | Order flow: Fabio model | Apr 2026 – Oct 2026 | 124 | −0.46 (−0.76 to −0.14) | −12.0% | −3.57 | −13.4% |
 
 - **R** is a trade's profit divided by the amount it risked. The 95%
@@ -58,14 +58,14 @@ period and entry window (08:00–11:00 ET), with the same exit time, costs, and
 stop and target sizes (drawn from the model's own trades), but on random days
 and minutes in a random direction.
 
-| | SMC: TJR model | Order flow: Fabio model |
+| | SMC strategy | Order flow: Fabio model |
 |---|---|---|
 | Strategy avg R | −0.08 | −0.46 |
 | Random runs: median avg R | −0.08 | −0.31 |
 | Random runs: 95% range | −0.24 to +0.05 | −0.59 to +0.15 |
 | Random runs worse than the strategy | 48% | 16% |
 
-- **SMC:** the result sits exactly in the middle of the random runs. TJR's
+- **SMC:** the result sits exactly in the middle of the random runs. The
   sequence of sweep, break of structure, pullback and 1-minute confirmation
   picked entries no better than coin flips with the same risk management.
 - **Order flow:** random entries with the same tight stops lost −0.31R on
@@ -73,7 +73,7 @@ and minutes in a random direction.
   costs, not its signals. The signals did slightly worse than the median
   random run, but well inside the random range: no evidence they help or hurt.
 
-### SMC (TJR model)
+### SMC strategy
 
 | | Trades | Avg R (95% CI) | Return | Sharpe |
 |---|---|---|---|---|
@@ -175,7 +175,7 @@ April 5 – October 16, 2026, the period covered by the order-flow data:
 | **Buy & hold** | **+16.2%** | **1.94** | −5.1% | 0 | – |
 | SMA + RSI(2) (Connors) | +4.4% | 1.54 | −1.8% | 8 | – |
 | Order flow: Fabio model | −12.0% | −3.57 | −13.4% | 124 | −0.46 |
-| SMC: TJR model | −17.4% | −1.17 | −27.9% | 42 | −0.21 |
+| SMC strategy | −17.4% | −1.17 | −27.9% | 42 | −0.21 |
 
 ![The same six months for all four strategies, each restarted at $100k](docs/equity_orderflow_window.png)
 
@@ -184,7 +184,7 @@ April 5 – October 16, 2026, the period covered by the order-flow data:
 - They show that **these mechanical rules** did no better than random entries
   and lost to buy-and-hold on MES over these dates, with costs included and
   rules fixed before the real data was run.
-- They don't show whether TJR, Fabio Valentini, or anyone trading these
+- They don't show whether ICT, Fabio Valentini, or anyone trading these
   ideas with judgment makes money. Discretion can't be backtested.
 - One market, one period for each strategy. The order-flow sample (6.5
   months, 124 trades) is much smaller than the SMC sample.
@@ -257,7 +257,7 @@ Results land in `results/`: `summary.md` (metrics + setup funnel),
 `leg_extreme`), `lvn_price`, `aggression` (big order / stacked imbalance) and
 `big_order_threshold`.
 
-`trades_tjr.csv` has one row per trade, times in New York time: entry/exit
+`trades_smc.csv` has one row per trade, times in New York time: entry/exit
 time and price, stop, target, exit reason (`target`, `stop`, `flatten` at
 16:00), P&L after costs, R multiple, risk in points, max favourable / adverse
 excursion (`mfe_pts`, `mae_pts`), and every step of the setup that produced
@@ -272,7 +272,7 @@ exploration, not as new rules.
 
 | | Entries | Stop | Target |
 |---|---|---|---|
-| **SMC: TJR model** | 1-minute bars. With the 4h bias, a previous-day / Asia / London / hourly low is swept; a 5m candle closes back through the latest swing or an inverse FVG; price pulls back into the new 5m FVG (or the move's 50%); a 1m break of structure or inverse FVG out of it triggers a market entry, 08:00–11:00 ET. | Sweep extreme | Nearest untaken liquidity ≥ 1R away |
+| **SMC strategy** | 1-minute bars. With the 4h bias, a previous-day / Asia / London / hourly low is swept; a 5m candle closes back through the latest swing or an inverse FVG; price pulls back into the new 5m FVG (or the move's 50%); a 1m break of structure or inverse FVG out of it triggers a market entry, 08:00–11:00 ET. | Sweep extreme | Nearest untaken liquidity ≥ 1R away |
 | **Order flow: Fabio model** | 1-minute order-flow bars. Balance = previous day's value area. Trend: a 5m close outside value, then a pullback into a low-volume node (LVN) of the impulse leg's volume profile. Mean reversion: a failed push outside value, a 5m close back inside, then a pullback into an LVN of the reclaim leg. Both need aggression at the LVN (a big aggressive order or 3+ stacked footprint imbalances); market entry, 08:00–11:00 ET. | 2 ticks beyond the aggression bar / LVN | Previous balance POC (trend) or balance POC (mean reversion), ≥ 1R |
 | **SMA + RSI(2) (Connors)** | Daily bars. Long when the close is above its 200-day SMA and RSI(2) < 10; short when below the 200-day SMA and RSI(2) > 90. Flat between trades. Sized at 100% of equity. From Connors & Alvarez, *Short Term Trading Strategies That Work* (2008); Pine version: `pine/sma_rsi_daily.pine`. | none | close back across the 5-day SMA |
 | **Buy & hold** | Buy at the start, hold to the end, roll each quarter. Sized so notional ≈ starting capital (no leverage). | none | none |
@@ -280,7 +280,7 @@ exploration, not as new rules.
 The SMC strategy day trades: one position at a time, 2% of equity risked
 per trade in the reported run (capped at 100 contracts), and anything still open is closed at
 16:00 ET. There is no daily trade cap beyond that. It runs on 1-minute bars
-because TJR's entry is a 1-minute confirmation; its 5-minute, hourly and
+because its entry is a 1-minute confirmation; its 5-minute, hourly and
 4-hour bars are built from completed 1-minute bars, so it only ever sees what
 a trader watching live would see.
 
@@ -312,12 +312,12 @@ trade by trade). `--control-runs 0` skips it.
 Change any setting without editing code:
 
 ```bash
-python run_backtest.py --set tjr.use_bias=false           # without the 4h bias
-python run_backtest.py --set tjr.min_target_rr=1.5
+python run_backtest.py --set smc.use_bias=false           # without the 4h bias
+python run_backtest.py --set smc.min_target_rr=1.5
 python run_backtest.py --set sma.allow_shorts=false       # long-only SMA + RSI
 ```
 
-The prefix picks the strategy: `tjr.` (`TJRConfig`,
+The prefix picks the strategy: `smc.` (`SMCConfig`,
 `backtest/strategies/smc.py`), `of.` (`FabioConfig`,
 `backtest/strategies/orderflow.py`) and `sma.` (`SMARSIConfig`,
 `backtest/strategies/sma_rsi.py`). Every variation you run
@@ -460,7 +460,7 @@ pine/              RSI(2) baseline in Pine; archive/ holds the earlier SMC Pine 
   same timestamp and side.
 - 1-minute bars are the finest data. There is no tick data, so the order of
   prices inside a bar is an assumption (see above).
-- No news filter by default. Add dates with `--set tjr.news_dates=2025-01-10,2025-02-07`.
+- No news filter by default. Add dates with `--set smc.news_dates=2025-01-10,2025-02-07`.
 - Overnight risk is not modelled for the SMC strategy, since it is always
   flat by 16:00 ET.
 - Commission of $1/side is a rough estimate. Check your broker's all-in cost

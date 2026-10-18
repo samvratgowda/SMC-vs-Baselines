@@ -14,7 +14,7 @@ import pytest
 
 from backtest.data import back_adjust, resample
 from backtest.engine import EngineConfig, run
-from backtest.strategies import SMARSIConfig, SMARSIStrategy, TJRConfig, TJRStrategy
+from backtest.strategies import SMARSIConfig, SMARSIStrategy, SMCConfig, SMCStrategy
 from backtest.synthetic import make_pair
 
 
@@ -38,8 +38,8 @@ def cuts_for(full, n_bars, max_cuts=12):
     return sorted({b + 1 for b in picks} | {n_bars // 2})
 
 
-def tjr_cuts(full, n_bars, per_kind=8):
-    """For the TJR model, also cut right after each kind of state change (5m
+def smc_cuts(full, n_bars, per_kind=8):
+    """For the SMC strategy, also cut right after each kind of state change (5m
     shift, pullback touch, invalidation). The stop and zone are set while the
     setup forms, long before the entry, so a leak there only shows up when the
     data ends during that stage."""
@@ -51,26 +51,26 @@ def tjr_cuts(full, n_bars, per_kind=8):
 
 
 # A wide window gives more decisions to compare on a few weeks of random data.
-TJR = {
-    "default": lambda: TJRStrategy(),
-    "wide_window_no_bias": lambda: TJRStrategy(TJRConfig(start="03:00", end="15:00", use_bias=False)),
+SMC_MODELS = {
+    "default": lambda: SMCStrategy(),
+    "wide_window_no_bias": lambda: SMCStrategy(SMCConfig(start="03:00", end="15:00", use_bias=False)),
 }
 
 
-@pytest.mark.parametrize("name", list(TJR))
-def test_tjr_decisions_never_use_later_bars(data, name):
-    full = decisions(TJR[name](), data, len(data))
+@pytest.mark.parametrize("name", list(SMC_MODELS))
+def test_smc_decisions_never_use_later_bars(data, name):
+    full = decisions(SMC_MODELS[name](), data, len(data))
     assert len([e for e in full if e[1] == "entry"]) >= 8, "test needs some decisions to compare"
-    for cut in tjr_cuts(full, len(data)):
-        part = decisions(TJR[name](), data.iloc[:cut], cut)
+    for cut in smc_cuts(full, len(data)):
+        part = decisions(SMC_MODELS[name](), data.iloc[:cut], cut)
         assert part == [e for e in full if e[0] < cut], f"decisions differ before bar {cut}"
 
 
-def test_tjr_replay_after_every_state_change(data):
+def test_smc_replay_after_every_state_change(data):
     """Cut after EVERY sweep, shift, touch, invalidation and entry on two weeks of data.
     Slower but exhaustive: a leak that only matters in a few setups still shows."""
     short = data.iloc[: 2 * 7 * 23 * 60]
-    make = TJR["wide_window_no_bias"]
+    make = SMC_MODELS["wide_window_no_bias"]
     full = decisions(make(), short, len(short))
     events = sorted({e[0] for e in full if e[1] in ("arm", "shift", "touch", "invalid", "entry")})
     assert len(events) >= 20
@@ -87,15 +87,15 @@ def _arrays(strategy, bars):
             if isinstance(v, np.ndarray) and v.ndim == 1 and len(v) == n}
 
 
-def test_tjr_precomputed_arrays_are_prefix_stable(data):
+def test_smc_precomputed_arrays_are_prefix_stable(data):
     """Every precomputed 1m series (previous-day levels, 4h bias, hourly swings,
     1m swings, session masks...) must have the same value at bar i whether or
     not later bars exist. This checks ALL bars up to each cut."""
-    full = _arrays(TJRStrategy(), data)
+    full = _arrays(SMCStrategy(), data)
     assert {"pdh", "pdl", "bias", "h1_sh", "h1_sl", "ph1", "flat_bar"} <= set(full)
     rng = np.random.default_rng(1)
     for cut in sorted(rng.integers(1000, len(data), 20)):
-        part = _arrays(TJRStrategy(), data.iloc[:cut])
+        part = _arrays(SMCStrategy(), data.iloc[:cut])
         for k, arr in part.items():
             np.testing.assert_array_equal(arr, full[k][:cut], err_msg=f"{k} changes when bars after {cut} exist")
 

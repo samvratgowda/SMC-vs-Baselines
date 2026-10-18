@@ -1,4 +1,5 @@
-"""TJR's model as he teaches it, coded step by step. Runs on 1-minute bars.
+"""The SMC strategy: a Smart Money Concepts model built from the Inner Circle
+Trader's (ICT) concepts, coded step by step. Runs on 1-minute bars.
 
     1. Bias       4-hour market structure: trade only in its direction
     2. Liquidity  previous day H/L, Asia H/L, London H/L, hourly swing H/L
@@ -12,12 +13,12 @@
     8. Target     the nearest untaken liquidity level at least 1R away
 
 (Longs described; shorts are the mirror image.) Entries 08:00-11:00 ET, one
-position at a time, 2.0% risk per trade, everything flat by 16:00 ET.
+position at a time, 0.5% risk per trade, everything flat by 16:00 ET.
 
 5-minute, 1-hour and 4-hour bars are built from COMPLETED 1-minute bars, so
 on every bar the strategy only knows what a trader watching live would know.
 STRATEGY_RULES.md lists the source of each rule and marks the choices made
-where TJR doesn't give a precise rule. None were chosen from backtest results.
+where the sources don't give a precise rule. None were chosen from backtest results.
 """
 from __future__ import annotations
 
@@ -39,7 +40,7 @@ def _nan(x) -> bool:
 
 
 @dataclass
-class TJRConfig:
+class SMCConfig:
     start: str = "08:00"           # entry window (ET)
     end: str = "11:00"
     flatten_time: str = "16:00"    # close any open position (ET)
@@ -80,16 +81,16 @@ def _on_1m(n: int, avail: np.ndarray, values: np.ndarray) -> np.ndarray:
     return last_value(out)
 
 
-class TJRStrategy(Strategy):
-    name = "SMC: TJR model"
-    tag = "tjr"
+class SMCStrategy(Strategy):
+    name = "SMC strategy"
+    tag = "smc"
     funnel_keys = ["Liquidity sweeps", "5m order-flow shift (BOS/IFVG)", "Pulled back into FVG/EQ",
                    "Invalidated: new extreme before entry", "1m entry confirmation", "Outside entry window",
                    "Against 4h bias", "No liquidity target >= min R", "Blocked: already in a trade",
                    "Orders placed", "Trades filled"]
 
-    def __init__(self, cfg: TJRConfig | None = None):
-        self.cfg = cfg or TJRConfig()
+    def __init__(self, cfg: SMCConfig | None = None):
+        self.cfg = cfg or SMCConfig()
         self.log: list[tuple] = []     # every order decision, used by the lookahead test
 
     # ------------------------------------------------------------------ setup

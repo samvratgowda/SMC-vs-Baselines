@@ -1,4 +1,4 @@
-"""A hand-built 1-minute price path with known answers for the TJR model.
+"""A hand-built 1-minute price path with known answers for the SMC strategy.
 
 Two CME trading days, flat at 100 except where a scenario sets a bar.
 Day 1 (Mon) makes the 4h bias bullish (a 4h close at 104 above the 4h swing
@@ -8,7 +8,7 @@ Day 2 (Tue) plays out every step of the model, worked out by hand below.
 import pandas as pd
 
 from backtest.engine import EngineConfig, run, trades_frame
-from backtest.strategies import TJRConfig, TJRStrategy
+from backtest.strategies import SMCConfig, SMCStrategy
 
 ET = "America/New_York"
 DAY1 = {
@@ -73,7 +73,7 @@ def ts(s):
 
 
 def test_every_step_of_the_model_on_a_known_path():
-    s = TJRStrategy()
+    s = SMCStrategy()
     tf = trades_frame(run(build(), s, EngineConfig())["trades"])
     assert len(tf) == 1
     t = tf.iloc[0]
@@ -96,29 +96,29 @@ def test_every_step_of_the_model_on_a_known_path():
 def test_no_long_without_bullish_4h_bias():
     day1 = dict(DAY1)
     day1["2024-03-04 16:59"] = (100, 100.25, 99.75, 100)   # no 4h close above the swing high
-    s = TJRStrategy()
+    s = SMCStrategy()
     assert run(build(day1=day1), s, EngineConfig())["trades"] == []
     assert s.funnel()["Against 4h bias"]["long"] == 1
-    s2 = TJRStrategy(TJRConfig(use_bias=False))
+    s2 = SMCStrategy(SMCConfig(use_bias=False))
     assert len(run(build(day1=day1), s2, EngineConfig())["trades"]) == 1
 
 
 def test_new_low_after_the_shift_invalidates_the_setup():
     day2 = dict(DAY2)
     day2["2024-03-05 09:20"] = (99.8, 100.0, 97.9, 99.95)  # trades below the 98.0 sweep low
-    s = TJRStrategy()
+    s = SMCStrategy()
     assert run(build(day2=day2), s, EngineConfig())["trades"] == []
     assert s.funnel()["Invalidated: new extreme before entry"]["long"] == 1
 
 
 def test_confirmation_outside_entry_window_is_not_traded():
-    s = TJRStrategy(TJRConfig(start="09:30", end="11:00"))
+    s = SMCStrategy(SMCConfig(start="09:30", end="11:00"))
     assert run(build(), s, EngineConfig())["trades"] == []
     assert s.funnel()["Outside entry window"]["long"] == 1
 
 
 def test_target_must_be_at_least_min_r_away():
     # Risk is 2.4 points (100.4 - 98.0); the nearest untaken high is 4.1 points away.
-    s = TJRStrategy(TJRConfig(min_target_rr=2.0))
+    s = SMCStrategy(SMCConfig(min_target_rr=2.0))
     assert run(build(), s, EngineConfig())["trades"] == []
     assert s.funnel()["No liquidity target >= min R"]["long"] == 1
