@@ -6,17 +6,17 @@ By Samvrat Gowda
 
 ## Summary
 
-**Question:** do two popular discretionary day-trading methods, a Smart Money
+**Question:** Do two popular discretionary day-trading methods, a Smart Money
 Concepts (SMC) model built from the Inner Circle Trader's (ICT) concepts and
 Fabio Valentini's order-flow model, have an edge on S&P 500 futures once their
 rules are written down and tested properly?
 
-**Method:** each method coded as fixed, sourced rules; tested on Micro E-mini
+**Method:** Each method coded as fixed, sourced rules; tested on Micro E-mini
 S&P 500 (MES) futures, 1-minute data from 2021 to October 2026, with trading
 costs; compared with buy-and-hold, a classic SMA + RSI strategy, and a
 **random-entry control** (500 runs with the same stops, targets and costs but
-random entries). Rules were fixed before the real data was run, and tests
-prove no decision can see future data.
+random entries). Rules were fixed before the real data was run so there was no 
+bias towards the specific chart's price action.
 
 **Findings:**
 - **SMC (ICT model):** 355 trades, −0.08R per trade, exactly the median of the
