@@ -1,30 +1,29 @@
-"""Baseline 1: daily SMA trend + RSI pullback, stop-and-reverse.
+"""Baseline: Larry Connors' RSI(2) strategy, the best-known SMA + RSI system.
 
-Port of the Pine script in pine/sma_rsi_daily.pine:
+From Connors & Alvarez, "Short Term Trading Strategies That Work" (2008), as
+described by StockCharts ChartSchool, LuxAlgo, Backtrex and ProRealCode:
 
-    goLong  = SMA(20) > SMA(50) and RSI(9) < 30     (pullback in an uptrend)
-    goShort = SMA(20) < SMA(50) and RSI(9) > 70     (rally in a downtrend)
+    Long:   close above its 200-day SMA (uptrend) and RSI(2) below 10 (sharp dip)
+            exit when the close is back above the 5-day SMA
+    Short:  close below its 200-day SMA (downtrend) and RSI(2) above 90 (sharp rally)
+            exit when the close is back below the 5-day SMA
 
-    if goLong and not long:            enter long  (reverses a short)
-    elif goShort and not short:        enter short (reverses a long)
-                                       or, with shorts off, close the long
-
-All of it is computed on DAILY bars: one bar per CME trading day (18:00 ET to
-17:00 ET, the same sessions TradingView's MES1! daily chart uses). The signal
-is read at the daily close and the order fills at the next session's open
-(18:00 ET). No stop, no target, no session window: a position is held until
-the opposite signal. Size = 100% of equity in notional value, like
-default_qty_type = percent_of_equity, 100 in Pine.
+Only SMAs and RSI, no stop. Flat between trades. All of it is computed on DAILY
+bars: one bar per CME trading day (18:00 ET to 17:00 ET, the same sessions
+TradingView's MES1! daily chart uses). The signal is read at the daily close and
+the order fills at the next session's open (18:00 ET). (Connors' tests buy on
+the close itself; filling at the next open is the same convention every other
+strategy here uses.) Size = 100% of equity in notional value at the real
+contract price, like buy & hold.
 
 The engine still steps through 5-minute bars, so costs and fills are handled
-the same way as for the other two strategies. "Daily close" is the close of the
+the same way as for the other strategies. "Daily close" is the close of the
 5-minute bar ending at 17:00 ET, the scheduled session end. On early-close
 holidays the last bar before the break is used; that relies on the exchange
 calendar (known in advance), never on future prices.
 
 Rolls: a position held through a quarterly roll pays a round trip of
-commission + slippage, like buy & hold. Back-adjusted prices remove the roll
-gap. (On unadjusted MES1!, TradingView books that gap as profit or loss.)
+commission + slippage, like buy & hold. Back-adjusted prices remove the roll gap.
 """
 from __future__ import annotations
 
@@ -41,11 +40,11 @@ from .base import Strategy
 
 @dataclass
 class SMARSIConfig:
-    sma_fast: int = 20
-    sma_slow: int = 50
-    rsi_len: int = 9
-    rsi_low: float = 30.0          # long when RSI < this (and fast SMA > slow SMA)
-    rsi_high: float = 70.0         # short when RSI > this (and fast SMA < slow SMA)
+    trend_sma: int = 200           # trade only with the trend: close vs 200-day SMA
+    exit_sma: int = 5              # exit when the close crosses back over the 5-day SMA
+    rsi_len: int = 2
+    rsi_long: float = 10.0         # long when RSI(2) < 10
+    rsi_short: float = 90.0        # short when RSI(2) > 90
     allow_shorts: bool = True
     pct_equity: float = 100.0      # notional as % of equity
 
@@ -57,7 +56,7 @@ def sma(x: np.ndarray, n: int) -> np.ndarray:
 
 class SMARSIStrategy(Strategy):
     tag = "sma_rsi"
-    name = "SMA + RSI (daily)"
+    name = "SMA + RSI(2) (Connors)"
 
     def __init__(self, cfg: SMARSIConfig | None = None, roll_times=()):
         self.cfg = cfg or SMARSIConfig()
@@ -81,11 +80,14 @@ class SMARSIStrategy(Strategy):
         # the bar that closes each day (NaN on every other bar).
         ends = np.flatnonzero(day_end)
         dc = c[ends]
-        f, s, r = sma(dc, cfg.sma_fast), sma(dc, cfg.sma_slow), rsi(dc, cfg.rsi_len)
-        self.sma_fast = np.full(n, np.nan)
-        self.sma_slow = np.full(n, np.nan)
+        self.daily_close = np.full(n, np.nan)
+        self.sma_trend = np.full(n, np.nan)
+        self.sma_exit = np.full(n, np.nan)
         self.rsi = np.full(n, np.nan)
-        self.sma_fast[ends], self.sma_slow[ends], self.rsi[ends] = f, s, r
+        self.daily_close[ends] = dc
+        self.sma_trend[ends] = sma(dc, cfg.trend_sma)
+        self.sma_exit[ends] = sma(dc, cfg.exit_sma)
+        self.rsi[ends] = rsi(dc, cfg.rsi_len)
 
         self.c = c
         # Real traded price for sizing; P&L still uses roll-adjusted price changes.
@@ -95,8 +97,8 @@ class SMARSIStrategy(Strategy):
         self.roll_bars = set(int(p) for p in pos if 0 < p < n)
         self.n_signals = [0, 0]
         self.n_orders = [0, 0]
+        self.n_exits = [0, 0]
         self.n_rolls = [0, 0]
-        self.n_closes = 0
 
     def on_bar(self, i: int, b) -> None:
         cfg, bc = self.cfg, self.bcfg
@@ -105,40 +107,45 @@ class SMARSIStrategy(Strategy):
             self.n_rolls[0 if b.pos.direction == 1 else 1] += 1
         if not self.day_end[i]:
             return
-        f, s, r = self.sma_fast[i], self.sma_slow[i], self.rsi[i]
-        if np.isnan(f) or np.isnan(s) or np.isnan(r):
+        close, trend, ex, r = self.daily_close[i], self.sma_trend[i], self.sma_exit[i], self.rsi[i]
+        if np.isnan(trend) or np.isnan(ex) or np.isnan(r):
             return
-        go_long = f > s and r < cfg.rsi_low
-        go_short = f < s and r > cfg.rsi_high
+        pos = b.position
+        # Exits first: back across the 5-day SMA.
+        if pos > 0 and close > ex:
+            b.flatten("close above 5-day SMA")
+            self.log.append((i, "exit", 1))
+            self.n_exits[0] += 1
+            return
+        if pos < 0 and close < ex:
+            b.flatten("close below 5-day SMA")
+            self.log.append((i, "exit", -1))
+            self.n_exits[1] += 1
+            return
+        if pos != 0 or b.has_pending:
+            return
+        go_long = close > trend and r < cfg.rsi_long
+        go_short = close < trend and r > cfg.rsi_short
         if go_long:
             self.n_signals[0] += 1
-        if go_short:
-            self.n_signals[1] += 1
-        pos = b.position
-        if go_long and pos <= 0:
             self._enter(i, b, 1)
-        elif go_short and pos >= 0:
+        elif go_short:
+            self.n_signals[1] += 1
             if cfg.allow_shorts:
                 self._enter(i, b, -1)
-            elif pos > 0:
-                b.flatten("short signal, long-only")
-                self.log.append((i, "flatten"))
-                self.n_closes += 1
 
     def _enter(self, i: int, b, d: int) -> None:
-        """strategy.entry with percent_of_equity sizing; reverses an opposite position."""
+        """Market order at the next open, sized at 100% of equity (percent_of_equity in Pine)."""
         bc = self.bcfg
         qty = math.floor(b.equity * self.cfg.pct_equity / 100 / (self.size_px[i] * bc.point_value))
         if qty < 1:
             return                    # TradingView places no order when qty rounds to 0
-        if b.position != 0:
-            b.flatten("reverse")      # closes at the next open, then the entry fills at that same open
         b.market_entry(d, qty, tag="sma_rsi")
         self.log.append((i, "entry", d, qty))
         self.n_orders[0 if d == 1 else 1] += 1
 
     def funnel(self) -> dict:
-        return {"Daily signals": {"long": self.n_signals[0], "short": self.n_signals[1]},
+        return {"Daily signals (flat)": {"long": self.n_signals[0], "short": self.n_signals[1]},
                 "Orders placed": {"long": self.n_orders[0], "short": self.n_orders[1]},
-                "Closed (shorts off)": {"long": self.n_closes, "short": 0},
+                "Exits at the 5-day SMA": {"long": self.n_exits[0], "short": self.n_exits[1]},
                 "Rolls paid": {"long": self.n_rolls[0], "short": self.n_rolls[1]}}

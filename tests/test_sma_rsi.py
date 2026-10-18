@@ -15,10 +15,17 @@ def setup():
     mes, _ = make_pair(start="2023-01-08", end="2025-01-05", seed=11)
     adj, rolls = back_adjust(mes)
     bars = resample(adj, "5min")
-    cfg = SMARSIConfig(rsi_low=45, rsi_high=55)
+    # A 50-day trend SMA and wider RSI levels give enough trades on two years of
+    # random data to check every rule; the defaults are 200 / 10 / 90.
+    cfg = SMARSIConfig(trend_sma=50, rsi_long=20, rsi_short=80)
     s = SMARSIStrategy(cfg, [r.time for r in rolls])
     res = run(bars, s, EngineConfig())
     return bars, s, res, cfg
+
+
+def test_defaults_are_connors_rsi2():
+    c = SMARSIConfig()
+    assert (c.trend_sma, c.exit_sma, c.rsi_len, c.rsi_long, c.rsi_short) == (200, 5, 2, 10.0, 90.0)
 
 
 def test_daily_indicators_match_groupby(setup):
@@ -28,46 +35,52 @@ def test_daily_indicators_match_groupby(setup):
     if len(ends) < len(daily):          # the data stops mid-session on its last day
         daily = daily.iloc[:-1]
     assert len(ends) == len(daily)
-    np.testing.assert_allclose(bars["close"].to_numpy()[ends], daily.to_numpy())
-    f = daily.rolling(cfg.sma_fast).mean().to_numpy()
-    np.testing.assert_allclose(s.sma_fast[ends], f, equal_nan=True)
+    np.testing.assert_allclose(s.daily_close[ends], daily.to_numpy())
+    np.testing.assert_allclose(s.sma_trend[ends], daily.rolling(cfg.trend_sma).mean().to_numpy(), equal_nan=True)
+    np.testing.assert_allclose(s.sma_exit[ends], daily.rolling(cfg.exit_sma).mean().to_numpy(), equal_nan=True)
     np.testing.assert_allclose(s.rsi[ends], rsi(daily.to_numpy(), cfg.rsi_len), equal_nan=True)
 
 
-def test_signals_follow_the_rules_and_fill_next_session_open(setup):
+def test_entries_follow_the_rules_and_fill_next_session_open(setup):
     bars, s, res, cfg = setup
     td = trading_day(bars.index)
     entries = [e for e in s.log if e[1] == "entry"]
-    assert len(entries) >= 6
+    assert len(entries) >= 8
     times = {t.entry_time for t in res["trades"]}
     for i, _, d, qty in entries:
         assert s.day_end[i]
         if d == 1:
-            assert s.sma_fast[i] > s.sma_slow[i] and s.rsi[i] < cfg.rsi_low
+            assert s.daily_close[i] > s.sma_trend[i] and s.rsi[i] < cfg.rsi_long
         else:
-            assert s.sma_fast[i] < s.sma_slow[i] and s.rsi[i] > cfg.rsi_high
-        # fills on the first bar of the next trading day
-        assert td[i + 1] != td[i] and bars.index[i + 1] in times
-        # 100% of equity (marked at this close) in notional, whole contracts
-        # sized on the real traded price, not the back-adjusted one
+            assert s.daily_close[i] < s.sma_trend[i] and s.rsi[i] > cfg.rsi_short
+        if i + 1 >= len(bars):
+            continue                   # signal on the data's last bar: nothing left to fill on
+        assert td[i + 1] != td[i] and bars.index[i + 1] in times      # next session's first bar
+        # 100% of equity in notional, sized on the real traded price
         assert qty == int(res["equity"].iloc[i] // (bars["raw_close"].iloc[i] * 5))
 
 
-def test_always_in_market_after_first_entry_and_reverses(setup):
-    _, _, res, _ = setup
+def test_exits_at_the_5_day_sma_and_flat_between_trades(setup):
+    bars, s, res, _ = setup
+    exits = {e[0]: e[2] for e in s.log if e[1] == "exit"}
+    assert exits
+    for i, d in exits.items():
+        if d == 1:
+            assert s.daily_close[i] > s.sma_exit[i]
+        else:
+            assert s.daily_close[i] < s.sma_exit[i]
     tr = res["trades"]
-    dirs = [t.direction for t in tr]
-    assert all(a != b for a, b in zip(dirs, dirs[1:])), "each trade should reverse the previous one"
     for a, b in zip(tr, tr[1:]):
-        assert a.exit_time == b.entry_time, "reversal closes and reopens at the same open"
+        assert b.entry_time > a.exit_time, "flat between trades: no reversal on the same open"
+    assert all(t.exit_reason in ("close above 5-day SMA", "close below 5-day SMA", "end of data") for t in tr)
 
 
-def test_long_only_closes_instead_of_shorting(setup):
-    bars, *_ = setup
-    s = SMARSIStrategy(SMARSIConfig(rsi_low=45, rsi_high=55, allow_shorts=False))
+def test_long_only(setup):
+    bars, _, _, cfg = setup
+    import dataclasses
+    s = SMARSIStrategy(dataclasses.replace(cfg, allow_shorts=False))
     res = run(bars, s, EngineConfig())
     assert res["trades"] and all(t.direction == 1 for t in res["trades"])
-    assert s.n_closes > 0
 
 
 def test_sizing_uses_real_price_not_back_adjusted():

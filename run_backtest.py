@@ -32,8 +32,8 @@ from backtest.strategies import BuyHoldStrategy, SMARSIConfig, SMARSIStrategy, T
 from backtest.strategies.orderflow import FabioConfig, FabioStrategy
 
 # Palette slots 1-3 (validated together); text stays in neutral ink.
-COLORS = {"SMC: TJR model": "#2a78d6", "Order flow: Fabio model": "#eda100",
-          "SMA + RSI (daily)": "#eb6834", "Buy & hold": "#1baf7a"}
+COLORS = {"SMC: TJR model": "#2a78d6", "Order flow: Fabio model": "#6250d6",
+          "SMA + RSI(2) (Connors)": "#eb6834", "Buy & hold": "#1baf7a"}
 OF_WINDOW = "Order-flow window"
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 
@@ -79,7 +79,10 @@ def fmt(v):
     return str(v)
 
 
-def plot_equity(results: dict, path: Path, split=None):
+def plot_equity(results: dict, path: Path, split=None, window=None):
+    """Daily equity of each strategy. With `window=(start, end)`, only that period
+    is drawn and every strategy is restarted at $100k on its first day, so lines
+    that started on different dates can be compared directly."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -90,6 +93,11 @@ def plot_equity(results: dict, path: Path, split=None):
     ends = []
     for name, res in results.items():
         eq = res["equity"]
+        if window is not None:
+            eq = eq[(eq.index >= window[0]) & (eq.index < window[1])]
+            if len(eq) < 2:
+                continue
+            eq = eq / eq.iloc[0] * 100_000
         d = eq.groupby(eq.index.tz_convert("America/New_York").date).last()
         x = pd.to_datetime(list(d.index))
         ax.plot(x, d.values, color=COLORS.get(name, INK2), lw=2, label=name, solid_capstyle="round")
@@ -103,18 +111,20 @@ def plot_equity(results: dict, path: Path, split=None):
     for y, name, x_end in ends:
         ax.annotate(name, (x_end, y), xytext=(6, 0), textcoords="offset points",
                     va="center", fontsize=9, color=INK, annotation_clip=False)
-    if split is not None:
+    if split is not None and window is None:
         ax.axvline(split.tz_convert(None), color=INK2, lw=1, ls=(0, (3, 3)))
         ax.annotate("test period →", (split.tz_convert(None), 1), xycoords=("data", "axes fraction"),
                     xytext=(6, -12), textcoords="offset points", fontsize=9, color=INK2)
-    ax.set_title("Account equity, $100k start", loc="left", fontsize=12, color=INK)
+    title = "Account equity, $100k start" if window is None else \
+        f"Same period for all ({window[0]:%b %Y} – {window[1]:%b %Y}), each restarted at $100k"
+    ax.set_title(title, loc="left", fontsize=12, color=INK)
     ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"${v/1000:,.0f}k"))
     ax.grid(axis="y", color=GRID, lw=0.8)
     for s in ("top", "right", "left"):
         ax.spines[s].set_visible(False)
     ax.spines["bottom"].set_color(GRID)
     ax.tick_params(colors=INK2, labelsize=9, length=0)
-    ax.legend(frameon=False, fontsize=9, labelcolor=INK, loc="upper left")
+    ax.legend(frameon=False, fontsize=9, labelcolor=INK, loc="best")
     fig.tight_layout()
     fig.subplots_adjust(right=0.86)
     fig.savefig(path, facecolor=SURFACE)
@@ -134,6 +144,8 @@ def main(argv=None) -> int:
     ap.add_argument("--years", type=float, default=5, help="Length of the synthetic data (default 5)")
     ap.add_argument("--of-bars", default="data/MES_of_1m.parquet", help="Order-flow bars (download_orderflow.py)")
     ap.add_argument("--of-vap", default="data/MES_vap_1m.parquet", help="Order-flow volume at price")
+    ap.add_argument("--control-runs", type=int, default=500,
+                    help="Random-entry control runs per active strategy (0 = skip)")
     ap.add_argument("--out", default="results")
     args = ap.parse_args(argv)
 
@@ -203,6 +215,23 @@ def main(argv=None) -> int:
         funnels[s.name] = s.funnel()
 
     plot_equity(results, out / "equity.png", split)
+    if extra:
+        plot_equity(results, out / "equity_orderflow_window.png", window=extra[OF_WINDOW])
+
+    # Random-entry control for the strategies with stops and targets.
+    controls = {}
+    if args.control_runs > 0:
+        from backtest.random_control import RandomTrades
+        for s, data in runs:
+            if s.tag not in ("tjr", "orderflow"):
+                continue
+            tf = trades_frame(results[s.name]["trades"])
+            if len(tf) < 5:
+                continue
+            print(f"Random-entry control for {s.name}: {args.control_runs} runs of {len(tf)} trades ...")
+            cfg = s.cfg
+            sim = RandomTrades(data, cfg.start, cfg.end, cfg.flatten_time, eng)
+            controls[s.name] = sim.run(tf, n_runs=args.control_runs, seed=1).summary()
 
     lines = ["# Backtest results", ""]
     lines.append(f"Data: MES {bars.index[0]:%Y-%m-%d} → {bars.index[-1]:%Y-%m-%d}, {len(bars1):,} one-minute bars (SMC) / {len(bars):,} five-minute bars (others)"
@@ -231,6 +260,15 @@ def main(argv=None) -> int:
         lines += ["", f"## {period}", "", "| Metric | " + " | ".join(cols) + " |", "|---|" + "---|" * len(cols)]
         for k in keys:
             lines.append(f"| {k} | " + " | ".join(fmt(tables[n][period].get(k, "")) for n in cols) + " |")
+    if controls:
+        cols = list(controls)
+        lines += ["", "## Random-entry control", "",
+                  "Same period, entry window, exit time, costs and stop/target sizes as each strategy "
+                  "(drawn from its own trades), but random days, minutes and directions. "
+                  "If the strategy's average R sits inside the random range, its signals added nothing measurable.", "",
+                  "| | " + " | ".join(cols) + " |", "|---|" + "---|" * len(cols)]
+        for k in controls[cols[0]]:
+            lines.append(f"| {k} | " + " | ".join(fmt(controls[c][k]) for c in cols) + " |")
     lines += ["", "## Setup funnel", ""]
     for n, f in funnels.items():
         if not f:
@@ -246,6 +284,10 @@ def main(argv=None) -> int:
     start = lines.index(f"## {shown}")
     stop = next((k for k in range(start + 1, len(lines)) if lines[k].startswith("## ")), len(lines))
     print("\n".join(lines[start:stop]))
+    if controls:
+        k0 = lines.index("## Random-entry control")
+        k1 = next((k for k in range(k0 + 1, len(lines)) if lines[k].startswith("## ")), len(lines))
+        print("\n".join(lines[k0:k1]))
     if extra and f"## {OF_WINDOW}" in lines:
         k0 = lines.index(f"## {OF_WINDOW}")
         k1 = next((k for k in range(k0 + 1, len(lines)) if lines[k].startswith("## ")), len(lines))

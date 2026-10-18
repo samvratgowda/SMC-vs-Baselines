@@ -1,47 +1,47 @@
 //@version=6
 // =============================================================================
-// Baseline: daily SMA trend + RSI pullback, stop-and-reverse.
+// Baseline: Larry Connors' RSI(2) strategy (SMA + RSI only).
+// Source: Connors & Alvarez, "Short Term Trading Strategies That Work" (2008).
 // Instrument: S&P 500 futures (MES1! recommended). Chart timeframe: 1 DAY.
 //
 // Python port: backtest/strategies/sma_rsi.py
 //
 // RULES
-//  - Signals are read at the daily close; the order fills at the next open.
-//  - Long  when SMA(20) > SMA(50) and RSI(9) < 30  (pullback in an uptrend).
-//  - Short when SMA(20) < SMA(50) and RSI(9) > 70  (rally in a downtrend).
-//  - Once in, a position is held until the opposite signal reverses it.
-//    No stops or targets.
-//  - Sized at 100% of equity, like the buy-and-hold benchmark. Futures trade in
-//    whole contracts, so use MES; ES may be too large for the account.
-//  - Set "Allow shorts" off to get the long-only version: a short signal then
-//    closes the long instead.
-// Fix the lengths and thresholds BEFORE testing; do not pick them from results.
-// Use the same continuous-contract settings (back-adjusted or not) in every test.
+//  - Long  when the close is above its 200-day SMA and RSI(2) < 10.
+//    Exit when the close is back above the 5-day SMA.
+//  - Short when the close is below its 200-day SMA and RSI(2) > 90.
+//    Exit when the close is back below the 5-day SMA.
+//  - Flat between trades. No stop, no target.
+//  - Signals are read at the daily close; orders fill at the next open
+//    (process_orders_on_close = false), the same convention as the Python port.
+//  - Sized at 100% of equity, like the buy-and-hold benchmark.
 // =============================================================================
-strategy("Baseline: SMA 20/50 + RSI 9 (daily, 100% equity)", overlay = true,
+strategy("Baseline: Connors RSI(2) (daily, 100% equity)", overlay = true,
      initial_capital = 100000, pyramiding = 0,
      default_qty_type = strategy.percent_of_equity, default_qty_value = 100,
      commission_type = strategy.commission.cash_per_contract, commission_value = 1.0,
      slippage = 1, calc_on_every_tick = false, process_orders_on_close = false)
 
-smaLen1     = input.int(20, "Fast SMA length (days)", minval = 2)
-smaLen2     = input.int(50, "Slow SMA length (days)", minval = 2)
+trendLen    = input.int(200, "Trend SMA (days)", minval = 2)
+exitLen     = input.int(5, "Exit SMA (days)", minval = 2)
+rsiLong     = input.float(10, "Long when RSI(2) below")
+rsiShort    = input.float(90, "Short when RSI(2) above")
 allowShorts = input.bool(true, "Allow shorts")
 
-float smaV1 = ta.sma(close, smaLen1)
-float smaV2 = ta.sma(close, smaLen2)
-float rsi1  = ta.rsi(close, 9)
+float smaTrend = ta.sma(close, trendLen)
+float smaExit  = ta.sma(close, exitLen)
+float rsi2     = ta.rsi(close, 2)
 
-bool goLong  = smaV1 > smaV2 and rsi1 < 30
-bool goShort = smaV1 < smaV2 and rsi1 > 70
+bool flat = strategy.position_size == 0
 
-if goLong and strategy.position_size <= 0
+if strategy.position_size > 0 and close > smaExit
+    strategy.close("Long", comment = "Close above 5-day SMA")
+else if strategy.position_size < 0 and close < smaExit
+    strategy.close("Short", comment = "Close below 5-day SMA")
+else if flat and close > smaTrend and rsi2 < rsiLong
     strategy.entry("Long", strategy.long)
-else if goShort and strategy.position_size >= 0
-    if allowShorts
-        strategy.entry("Short", strategy.short)
-    else
-        strategy.close_all(comment = "Short signal, long-only")
+else if flat and allowShorts and close < smaTrend and rsi2 > rsiShort
+    strategy.entry("Short", strategy.short)
 
-plot(smaV1, "Fast SMA", color.orange)
-plot(smaV2, "Slow SMA", color.yellow)
+plot(smaTrend, "200-day SMA", color.orange)
+plot(smaExit, "5-day SMA", color.yellow)

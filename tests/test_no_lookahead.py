@@ -119,7 +119,7 @@ def long_bars():
 
 
 # Loose thresholds so a year of random data gives plenty of reversals to check.
-LOOSE = SMARSIConfig(rsi_low=45, rsi_high=55)
+LOOSE = SMARSIConfig(trend_sma=50, rsi_long=20, rsi_short=80)
 
 
 def test_sma_rsi_no_lookahead(long_bars):
@@ -134,7 +134,7 @@ def test_sma_rsi_no_lookahead(long_bars):
 def test_sma_rsi_arrays_are_prefix_stable(long_bars):
     bars = long_bars
     full = _arrays(SMARSIStrategy(), bars)
-    assert {"day_end", "sma_fast", "sma_slow", "rsi"} <= set(full)
+    assert {"day_end", "daily_close", "sma_trend", "sma_exit", "rsi"} <= set(full)
     rng = np.random.default_rng(2)
     for cut in sorted(rng.integers(300, len(bars), 15)):
         part = _arrays(SMARSIStrategy(), bars.iloc[:cut])
