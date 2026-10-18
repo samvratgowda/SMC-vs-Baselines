@@ -1,5 +1,7 @@
 # Do Smart Money Concepts work? A backtest on MES futures
 
+By Samvrat Gowda
+
 This project tests the Smart Money Concepts (SMC) day-trading model taught
 by TJR, the most-followed SMC trader online, and an order-flow model based on
 Fabio Valentini's teaching, against two baselines: a daily SMA + RSI strategy
@@ -17,6 +19,155 @@ TradingView's free plan only loads about 18 trading days of 5-minute bars.
 > **Scope of the claim.** These are mechanical versions of discretionary methods.
 > The conclusion this project can support is "these rules did X on this data",
 > not "SMC does/doesn't work".
+
+## Results
+
+**Short answer: no.** On MES futures, neither the SMC (TJR) model nor the
+order-flow (Fabio) model beat buy-and-hold. The order-flow model lost money
+with statistical confidence; the SMC model showed no detectable edge, with a
+negative point estimate. Buy-and-hold had the best return and the best
+risk-adjusted return in every period tested.
+
+### Headline numbers
+
+| Strategy | Period | Trades | Avg R per trade (95% CI) | Return | Sharpe | Max drawdown |
+|---|---|---|---|---|---|---|
+| **Buy & hold** | Jan 2021 – Oct 2026 | 1 | – | **+76.9%** | **0.69** | −23.7% |
+| SMC: TJR model | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −54.5% | −0.43 | −65.0% |
+| Order flow: Fabio model | Apr 2026 – Oct 2026 | 124 | **−0.46 (−0.76 to −0.14)** | −12.0% | −3.57 | −13.4% |
+| SMA + RSI (daily) | Jan 2021 – Oct 2026 | 18 | – | −4.6% | 0.01 | −19.1% |
+
+- **R** is a trade's profit divided by the amount it risked. The 95%
+  confidence interval comes from 10,000 bootstrap resamples of the trades.
+  An interval that includes zero means the sample can't tell an edge from luck.
+- Compare **Sharpe and average R**, not dollar returns. The SMC run risked 2%
+  of equity per trade and the order-flow run 0.5%, so their returns are on
+  different scales. Buy-and-hold and SMA + RSI have no stop, so no R.
+- Order-flow data (every trade with its aggressor side) is much more
+  expensive than 1-minute bars, so that test covers 6.5 months instead of
+  5.8 years.
+
+![Account equity of each strategy, $100k start](docs/equity.png)
+
+### SMC (TJR model): no detectable edge
+
+| | Trades | Avg R (95% CI) | Return | Sharpe |
+|---|---|---|---|---|
+| Train, 2021–2024 | 234 | −0.10 (−0.30 to +0.12) | −45.2% | −0.49 |
+| Test, 2025 – Oct 2026 | 121 | −0.06 (−0.32 to +0.22) | −17.1% | −0.41 |
+| **Full** | **355** | **−0.08 (−0.24 to +0.08)** | −54.5% | −0.43 |
+
+The rules lost money in both the training period and the held-out test
+period, so there's no sign of a strategy that worked and then stopped. The
+confidence interval still includes zero, so the result is "no detectable
+edge", not a proven loser. The data do rule out an edge larger than about
++0.08R per trade. Win rate was 34%, profit factor 0.80.
+
+The large drawdown (−65%) comes mostly from risking 2% per trade on a losing
+strategy. At 0.5% per trade the same trades would have drawn down roughly a
+quarter as much.
+
+Where SMC setups dropped out (long / short):
+
+| Step | Long | Short |
+|---|---|---|
+| Liquidity sweeps | 4,147 | 4,613 |
+| 5m order-flow shift (BOS / inverse FVG) | 3,209 | 3,642 |
+| Pulled back into the FVG / equilibrium | 3,171 | 3,591 |
+| Invalidated: new extreme before entry | 492 | 559 |
+| 1m entry confirmation | 2,679 | 3,030 |
+| Outside the 08:00–11:00 ET entry window | 2,191 | 2,485 |
+| Against the 4h bias | 211 | 328 |
+| No liquidity target at least 1R away | 96 | 43 |
+| **Trades** | **181** | **174** |
+
+Most complete setups (82%) happen outside the New York morning window, which
+is why 8,760 sweeps produced only 355 trades.
+
+### Order flow (Fabio model): a statistically clear loser
+
+124 trades from April 5 to October 16, 2026 averaged **−0.46R** per trade
+after costs (95% CI −0.76 to −0.14). The whole interval is below zero, and
+virtually every bootstrap resample was negative (p = 1.00 after rounding). Win rate was 19%, profit factor 0.53.
+
+Where the loss came from:
+
+| | Avg R per trade |
+|---|---|
+| Before costs | −0.22 |
+| Costs (commission + slippage) | −0.25 |
+| **After costs** | **−0.46** |
+
+(Each figure is rounded to two decimals, so the parts don't add exactly.)
+
+About half the loss was trading costs. With a median stop of 4 points, a
+round trip of commission plus a tick of slippage on entry and stop costs
+about a quarter of the risk. The other half came from the signals
+themselves: before costs they averaged −0.22R, so they showed no edge to
+begin with.
+
+| Setup | Trades | Avg R |
+|---|---|---|
+| Trend (breakout from value) | 62 | −0.37 |
+| Mean reversion (failed breakout) | 62 | −0.55 |
+
+Both setups lost. With 62 trades each, the gap between them isn't reliable
+evidence that one is better.
+
+Where order-flow setups dropped out (long / short):
+
+| Step | Long | Short |
+|---|---|---|
+| Trend: 5m close outside the previous day's value area | 288 | 299 |
+| Mean reversion: failed breakout reclaimed | 472 | 437 |
+| Invalidated: leg extreme broken | 275 | 262 |
+| Aggression at a low-volume node | 466 | 463 |
+| Outside the 08:00–11:00 ET entry window | 356 | 368 |
+| No POC target at least 1R away | 32 | 36 |
+| Blocked: already in a trade | 8 | 5 |
+| **Trades** | **70** | **54** |
+
+### All four strategies over the same six months
+
+April 5 – October 16, 2026, the period covered by the order-flow data:
+
+| Strategy | Return | Sharpe | Max drawdown | Trades | Avg R |
+|---|---|---|---|---|---|
+| **Buy & hold** | **+16.2%** | **1.94** | −5.1% | 0 | – |
+| SMA + RSI (daily) | −1.3% | −0.39 | −8.2% | 1 | – |
+| Order flow: Fabio model | −12.0% | −3.57 | −13.4% | 124 | −0.46 |
+| SMC: TJR model | −17.4% | −1.17 | −27.9% | 42 | −0.21 |
+
+### SMA + RSI baseline
+
+18 trades in almost six years (−4.6%, Sharpe 0.01). It made money in the
+training period (+5.8%, 13 trades) and lost in the test period (−10.1%, 5
+trades). With this few trades no conclusion about the rules is possible,
+beyond the fact that it didn't beat buy-and-hold either.
+
+### What these results do and don't show
+
+- They show that **these mechanical rules** lost to buy-and-hold on MES over
+  these dates, with costs included and rules fixed before the real data was
+  run.
+- They don't show whether TJR, Fabio Valentini, or anyone trading these
+  ideas with judgment makes money. Discretion can't be backtested.
+- One market, one period for each strategy. The order-flow sample (6.5
+  months, 124 trades) is much smaller than the SMC sample.
+- Databento flagged a handful of days as reduced data quality; they were
+  kept.
+- This matches large studies of day traders: in Brazil, 97% of people who
+  day-traded futures for 300+ days lost money
+  ([Chague, De-Losso & Giovannetti](https://ideas.repec.org/p/fgv/eesptd/525.html));
+  in Taiwan, under 1% earned reliable profits after fees
+  ([Barber, Lee, Liu & Odean, 2014](https://ideas.repec.org/a/eee/finmar/v18y2014icp1-24.html)).
+
+<!-- TODO: add 2-3 hand-checked trades here: a TradingView screenshot of each with the
+     sweep, entry, stop and target marked, saved as docs/trade1.png etc. -->
+
+To reproduce: download the data (see Quick start), then
+`python run_backtest.py --split 2025-01-01`. The settings used are printed at
+the top of `results/summary.md`.
 
 ## Quick start
 
@@ -92,8 +243,8 @@ exploration, not as new rules.
 | **SMA + RSI (daily)** | Daily bars. Long when SMA(20) > SMA(50) and RSI(9) < 30; short when SMA(20) < SMA(50) and RSI(9) > 70. Stop-and-reverse: held until the opposite signal. Sized at 100% of equity. Pine original: `pine/sma_rsi_daily.pine`. | none | none |
 | **Buy & hold** | Buy at the start, hold to the end, roll each quarter. Sized so notional ≈ starting capital (no leverage). | none | none |
 
-The SMC strategy day trades: one position at a time, 0.5% of equity risked
-per trade (capped at 10 contracts), and anything still open is closed at
+The SMC strategy day trades: one position at a time, 2% of equity risked
+per trade in the reported run (capped at 100 contracts), and anything still open is closed at
 16:00 ET. There is no daily trade cap beyond that. It runs on 1-minute bars
 because TJR's entry is a 1-minute confirmation; its 5-minute, hourly and
 4-hour bars are built from completed 1-minute bars, so it only ever sees what
@@ -250,9 +401,9 @@ pine/              SMA + RSI Pine original; archive/ holds the earlier SMC Pine 
 
 - **Order flow on random data.** The synthetic test data has random wicks,
   which hit tight stops far more often than wide targets. The order-flow
-  strategy uses 1–3 point stops, so it looks especially bad on synthetic data
-  (about −0.4R to −0.8R per trade); without wicks it's near zero. Only real
-  data says anything about it.
+  strategy uses tight stops (median 4 points on real data), so it looks
+  especially bad on synthetic data (about −0.4R to −0.8R per trade); without
+  wicks it's near zero. Only real data says anything about it.
 - **Aggressive order size** is approximated by summing trade records with the
   same timestamp and side.
 - 1-minute bars are the finest data. There is no tick data, so the order of
@@ -262,3 +413,12 @@ pine/              SMA + RSI Pine original; archive/ holds the earlier SMC Pine 
   flat by 16:00 ET.
 - Commission of $1/side is a rough estimate. Check your broker's all-in cost
   (exchange and clearing fees included) and set it in `EngineConfig`.
+
+## How this was built
+
+<!-- Edit this so it matches exactly what you did. -->
+I designed the research question, chose the strategies and baselines, fixed
+the rules and settings before running the real data, ran the experiments and
+interpreted the results. Most of the code was written with an AI assistant
+(Claude). I reviewed it, ran the test suite, and can explain how each part
+works.
