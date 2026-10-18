@@ -1,16 +1,17 @@
 # Do Smart Money Concepts work? A backtest on MES futures
 
 This project tests the Smart Money Concepts (SMC) day-trading model taught
-by TJR, the most-followed SMC trader online, against two baselines: a daily
-SMA + RSI strategy and buy-and-hold. All three run on the same Micro E-mini
-S&P 500 (MES) data with the same costs.
+by TJR, the most-followed SMC trader online, and an order-flow model based on
+Fabio Valentini's teaching, against two baselines: a daily SMA + RSI strategy
+and buy-and-hold. All run on the same Micro E-mini S&P 500 (MES) data with
+the same costs.
 
 The SMC strategy follows TJR's sequence step by step: 4h bias → liquidity
 sweep → 5m change in order flow → pullback into the FVG/equilibrium → 1m
 confirmation entry, stop at the sweep, target the next liquidity. Every rule
 and its source is in [`STRATEGY_RULES.md`](STRATEGY_RULES.md); where TJR
 leaves a rule open, the choice is marked and was fixed before any backtest on
-real data. Python is used instead of TradingView because
+real data. The order-flow rules are in [`ORDERFLOW_RULES.md`](ORDERFLOW_RULES.md). Python is used instead of TradingView because
 TradingView's free plan only loads about 18 trading days of 5-minute bars.
 
 > **Scope of the claim.** These are mechanical versions of discretionary methods.
@@ -23,7 +24,7 @@ TradingView's free plan only loads about 18 trading days of 5-minute bars.
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python -m pytest -q                       # 28 tests, about 1.5 minutes
+python -m pytest -q                       # 40 tests, about 3 minutes
 python run_backtest.py --synthetic        # dry run on 5 years of random-walk data (--years N to change)
 ```
 
@@ -41,7 +42,21 @@ Then get real data:
 
    This saves `data/MES_1m.parquet`.
 
-4. Run the backtest. Pick the split date **before** you look at results:
+4. Optional, order flow: the order-flow strategy needs every trade with its
+   aggressor side (Databento `trades`), which costs far more than 1-minute
+   bars. Check the price for a shorter window first; the script asks before
+   downloading:
+
+   ```bash
+   python scripts/download_orderflow.py --start 2026-04-01 --end 2026-10-01
+   ```
+
+   This writes `data/MES_of_1m.parquet` and `data/MES_vap_1m.parquet`. The
+   backtest then adds the order-flow strategy automatically, and the report
+   gets an **Order-flow window** table comparing all four strategies over
+   exactly those dates.
+
+5. Run the backtest. Pick the split date **before** you look at results:
 
    ```bash
    python run_backtest.py --split 2025-01-01
@@ -51,6 +66,11 @@ Results land in `results/`: `summary.md` (metrics + setup funnel),
 `equity.png`, and one `trades_*.csv` per strategy.
 
 ### The trade dataset
+
+`trades_orderflow.csv` has the same base columns plus `model`, the balance
+(`balance_val`/`vah`/`poc`), the leg (`leg_start_time`, `leg_origin`,
+`leg_extreme`), `lvn_price`, `aggression` (big order / stacked imbalance) and
+`big_order_threshold`.
 
 `trades_tjr.csv` has one row per trade, times in New York time: entry/exit
 time and price, stop, target, exit reason (`target`, `stop`, `flatten` at
@@ -63,11 +83,12 @@ it: `levels_swept` (e.g. `Asia L+PDL`), `sweep_time`, `sweep_extreme`,
 time of day or confirmation type, as long as those breakdowns are reported as
 exploration, not as new rules.
 
-## The three strategies
+## The strategies
 
 | | Entries | Stop | Target |
 |---|---|---|---|
 | **SMC: TJR model** | 1-minute bars. With the 4h bias, a previous-day / Asia / London / hourly low is swept; a 5m candle closes back through the latest swing or an inverse FVG; price pulls back into the new 5m FVG (or the move's 50%); a 1m break of structure or inverse FVG out of it triggers a market entry, 08:00–11:00 ET. | Sweep extreme | Nearest untaken liquidity ≥ 1R away |
+| **Order flow: Fabio model** | 1-minute order-flow bars. Balance = previous day's value area. Trend: a 5m close outside value, then a pullback into a low-volume node (LVN) of the impulse leg's volume profile. Mean reversion: a failed push outside value, a 5m close back inside, then a pullback into an LVN of the reclaim leg. Both need aggression at the LVN (a big aggressive order or 3+ stacked footprint imbalances); market entry, 08:00–11:00 ET. | 2 ticks beyond the aggression bar / LVN | Previous balance POC (trend) or balance POC (mean reversion), ≥ 1R |
 | **SMA + RSI (daily)** | Daily bars. Long when SMA(20) > SMA(50) and RSI(9) < 30; short when SMA(20) < SMA(50) and RSI(9) > 70. Stop-and-reverse: held until the opposite signal. Sized at 100% of equity. Pine original: `pine/sma_rsi_daily.pine`. | none | none |
 | **Buy & hold** | Buy at the start, hold to the end, roll each quarter. Sized so notional ≈ starting capital (no leverage). | none | none |
 
@@ -95,7 +116,8 @@ python run_backtest.py --set sma.allow_shorts=false       # long-only SMA + RSI
 ```
 
 The prefix picks the strategy: `tjr.` (`TJRConfig`,
-`backtest/strategies/smc.py`) and `sma.` (`SMARSIConfig`,
+`backtest/strategies/smc.py`), `of.` (`FabioConfig`,
+`backtest/strategies/orderflow.py`) and `sma.` (`SMARSIConfig`,
 `backtest/strategies/sma_rsi.py`). Every variation you run
 counts as a test. Write each one down and report it, including the ones you
 drop.
@@ -139,6 +161,16 @@ at the swing bar, the stop seeing the next bars' low, and the equilibrium seeing
 the next bars' high. In SMA + RSI: each day's indicators computed from the next
 day's close. The first version of the replay test missed the last two; cutting
 after every state change fixed that.
+
+The order-flow strategy has the same two checks
+(`tests/test_orderflow_lookahead.py`), mutation-tested with five planted
+leaks: today's value area used as "previous day", the big-order threshold
+including today, the leg's volume profile seeing the next minutes (twice), and
+aggression read from the next bar. `tests/test_orderflow_strategy.py` replays
+a hand-built trade tape where every step was worked out by hand (value area,
+reclaim, the exact LVN, the stacked imbalances, entry, stop, target), and
+`tests/test_orderflow_data.py` checks the trade aggregation with exact
+answers.
 
 `tests/test_smc.py` also runs the SMC strategy on a hand-built 1-minute price
 path where every step was worked out by hand (sweep time, 5m BOS bar,
@@ -203,16 +235,26 @@ backtest/
   indicators.py    ATR, EMA, RSI, pivots (TradingView definitions)
   metrics.py       Sharpe, drawdown, R stats, bootstrap
   synthetic.py     random-walk test data
-  strategies/      smc.py, sma_rsi.py, buy_hold.py
+  strategies/      smc.py, orderflow.py, sma_rsi.py, buy_hold.py
 scripts/download_data.py
 run_backtest.py
 tests/
 STRATEGY_RULES.md  every SMC rule with its source
+ORDERFLOW_RULES.md every order-flow rule with its source
+backtest/orderflow.py        trades -> order-flow bars, volume profile, value area, LVNs
+scripts/download_orderflow.py  trade-level download, condensed week by week
 pine/              SMA + RSI Pine original; archive/ holds the earlier SMC Pine experiments
 ```
 
 ## Limitations
 
+- **Order flow on random data.** The synthetic test data has random wicks,
+  which hit tight stops far more often than wide targets. The order-flow
+  strategy uses 1–3 point stops, so it looks especially bad on synthetic data
+  (about −0.4R to −0.8R per trade); without wicks it's near zero. Only real
+  data says anything about it.
+- **Aggressive order size** is approximated by summing trade records with the
+  same timestamp and side.
 - 1-minute bars are the finest data. There is no tick data, so the order of
   prices inside a bar is an assumption (see above).
 - No news filter by default. Add dates with `--set tjr.news_dates=2025-01-10,2025-02-07`.

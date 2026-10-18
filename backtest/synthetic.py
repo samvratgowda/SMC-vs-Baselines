@@ -59,3 +59,32 @@ def make_pair(start: str = "2024-01-07", end: str = "2024-04-27", seed: int = 7,
         frames.append(df)
     frames[0].index.name = frames[1].index.name = "ts_event"
     return frames[0], frames[1]
+
+
+def make_trades(bars_1m: pd.DataFrame, per_minute: int = 12, seed: int = 5) -> pd.DataFrame:
+    """Synthetic trades consistent with 1-minute bars: each minute's trades start at
+    its open, touch its high and low, and end at its close. Aggressor side leans
+    with the bar's direction; about 1% of trades are large. No real order-flow edge."""
+    rng = np.random.default_rng(seed)
+    n, k = len(bars_1m), per_minute
+    o, h, l, c = (bars_1m[x].to_numpy() for x in ("open", "high", "low", "close"))
+    lo_t, hi_t = np.round(l / 0.25).astype(int), np.round(h / 0.25).astype(int)
+    span = hi_t - lo_t + 1
+    ticks = lo_t[:, None] + (rng.random((n, k)) * span[:, None]).astype(int)
+    ticks[:, 0] = np.round(o / 0.25)
+    ticks[:, 1] = hi_t
+    ticks[:, 2] = lo_t
+    ticks[:, -1] = np.round(c / 0.25)
+    order = np.argsort(rng.random((n, k - 2)), axis=1) + 1          # shuffle middle trades
+    mid = np.take_along_axis(ticks[:, 1:-1], order - 1, axis=1)
+    ticks[:, 1:-1] = mid
+    size = rng.geometric(0.4, (n, k))
+    big = rng.random((n, k)) < 0.01
+    size[big] = rng.integers(30, 80, big.sum())
+    p_buy = np.clip(0.5 + 0.2 * np.sign(c - o), 0.05, 0.95)[:, None]
+    side = np.where(rng.random((n, k)) < p_buy, "B", "A")
+    offs = np.sort(rng.integers(0, 59_000, (n, k)), axis=1)
+    ts = bars_1m.index.tz_convert("UTC").tz_localize(None).to_numpy()[:, None] + offs.astype("timedelta64[ms]")
+    return pd.DataFrame({"ts_event": pd.to_datetime(ts.ravel(), utc=True), "price": ticks.ravel() * 0.25,
+                         "size": size.ravel(), "side": side.ravel(),
+                         "instrument_id": np.repeat(bars_1m["instrument_id"].to_numpy(), k)})

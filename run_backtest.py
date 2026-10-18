@@ -6,7 +6,10 @@ Examples:
     python run_backtest.py --set tjr.use_bias=false --set sma.allow_shorts=false
     python run_backtest.py --synthetic                      # random-walk data, checks the pipeline
 
---set prefixes: tjr. (SMC, TJR model), sma. (SMA + RSI).
+--set prefixes: tjr. (SMC, TJR model), of. (order flow, Fabio model), sma. (SMA + RSI).
+The order-flow strategy runs automatically when data/MES_of_1m.parquet exists
+(scripts/download_orderflow.py); the report then also compares all strategies
+over the order-flow data's dates.
 
 Outputs go to results/: summary.md, trades_*.csv, equity.png
 """
@@ -24,14 +27,18 @@ import pandas as pd
 from backtest.data import back_adjust, prepare, resample
 from backtest.engine import EngineConfig, run, trades_frame
 from backtest.metrics import split_results
+from backtest.orderflow import aggregate_trades, load_orderflow, prepare_orderflow
 from backtest.strategies import BuyHoldStrategy, SMARSIConfig, SMARSIStrategy, TJRConfig, TJRStrategy
+from backtest.strategies.orderflow import FabioConfig, FabioStrategy
 
 # Palette slots 1-3 (validated together); text stays in neutral ink.
-COLORS = {"SMC: TJR model": "#2a78d6", "SMA + RSI (daily)": "#eb6834", "Buy & hold": "#1baf7a"}
+COLORS = {"SMC: TJR model": "#2a78d6", "Order flow: Fabio model": "#eda100",
+          "SMA + RSI (daily)": "#eb6834", "Buy & hold": "#1baf7a"}
+OF_WINDOW = "Order-flow window"
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 
 
-PREFIXES = ("tjr", "sma")
+PREFIXES = ("tjr", "sma", "of")
 
 
 def parse_sets(pairs: list[str], cfg_obj, prefix: str):
@@ -125,6 +132,8 @@ def main(argv=None) -> int:
     ap.add_argument("--set", action="append", default=[], help="Override a strategy setting, e.g. --set target_rr=2")
     ap.add_argument("--synthetic", action="store_true", help="Use generated random-walk data")
     ap.add_argument("--years", type=float, default=5, help="Length of the synthetic data (default 5)")
+    ap.add_argument("--of-bars", default="data/MES_of_1m.parquet", help="Order-flow bars (download_orderflow.py)")
+    ap.add_argument("--of-vap", default="data/MES_vap_1m.parquet", help="Order-flow volume at price")
     ap.add_argument("--out", default="results")
     args = ap.parse_args(argv)
 
@@ -133,6 +142,10 @@ def main(argv=None) -> int:
         start = pd.Timestamp("2021-01-03")
         mes1, mnq1 = make_pair(start=str(start.date()),
                                end=str((start + pd.Timedelta(days=round(365.25 * args.years))).date()))
+        # Order flow for the last 6 months only, like a typical (costlier) trade-data download.
+        from backtest.synthetic import make_trades
+        raw_tail = mes1[mes1.index >= mes1.index[-1] - pd.Timedelta(days=182)]
+        of = prepare_orderflow(*aggregate_trades(make_trades(raw_tail)), adjust=not args.no_adjust)
         mes1, rolls = back_adjust(mes1) if not args.no_adjust else (mes1, back_adjust(mes1)[1])
         bars1, bars = mes1, resample(mes1, "5min")
     else:
@@ -140,22 +153,36 @@ def main(argv=None) -> int:
             print(f"{args.mes} not found. Run scripts/download_data.py first, or use --synthetic.", file=sys.stderr)
             return 1
         bars1, bars, rolls = prepare(args.mes, adjust=not args.no_adjust)
+        of = None
+        if Path(args.of_bars).exists() and Path(args.of_vap).exists():
+            of = load_orderflow(args.of_bars, args.of_vap, adjust=not args.no_adjust)
 
     if args.start:
         t0 = pd.Timestamp(args.start, tz="America/New_York")
         bars, bars1 = bars[bars.index >= t0], bars1[bars1.index >= t0]
+        if of is not None:
+            of = (of[0][of[0].index >= t0], of[1], of[2])
     if args.end:
         t1 = pd.Timestamp(args.end, tz="America/New_York")
         bars, bars1 = bars[bars.index < t1], bars1[bars1.index < t1]
+        if of is not None:
+            of = (of[0][of[0].index < t1], of[1], of[2])
     split = pd.Timestamp(args.split, tz="America/New_York") if args.split else None
 
     tjr_cfg = parse_sets(args.set, TJRConfig(), "tjr")
     ma_cfg = parse_sets(args.set, SMARSIConfig(), "sma")
+    of_cfg = parse_sets(args.set, FabioConfig(), "of")
     eng = EngineConfig(intrabar=args.intrabar)
 
     roll_times = [r.time for r in rolls]
     # The TJR model enters on 1-minute confirmations, so it runs on 1-minute bars.
     runs = [(TJRStrategy(tjr_cfg), bars1), (SMARSIStrategy(ma_cfg, roll_times), bars), (BuyHoldStrategy(roll_times), bars)]
+    extra = {}
+    if of is not None and len(of[0]) > 1:
+        # Order flow runs on its own (usually shorter) data; every strategy is also
+        # measured over exactly those dates so the four can be compared fairly.
+        runs.insert(1, (FabioStrategy(of[1], of_cfg), of[0]))
+        extra[OF_WINDOW] = (of[0].index[0], of[0].index[-1] + pd.Timedelta(seconds=1))
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     results, tables, funnels = {}, {}, {}
@@ -172,7 +199,7 @@ def main(argv=None) -> int:
                 csv[col] = pd.to_datetime(csv[col], utc=True).dt.tz_convert("America/New_York")
         csv.to_csv(out / f"trades_{slug}.csv", index=False)
         results[s.name] = res
-        tables[s.name] = split_results(res, tf, split)
+        tables[s.name] = split_results(res, tf, split, extra)
         funnels[s.name] = s.funnel()
 
     plot_equity(results, out / "equity.png", split)
@@ -181,14 +208,18 @@ def main(argv=None) -> int:
     lines.append(f"Data: MES {bars.index[0]:%Y-%m-%d} → {bars.index[-1]:%Y-%m-%d}, {len(bars1):,} one-minute bars (SMC) / {len(bars):,} five-minute bars (others)"
                  + (" (synthetic random walk)" if args.synthetic else "")
                  + f"; {len(rolls)} contract roll(s), {'back-adjusted' if not args.no_adjust else 'unadjusted'}.")
+    if extra:
+        a, b = extra[OF_WINDOW]
+        lines.append(f"Order-flow data (trades with aggressor side): {a:%Y-%m-%d} → {b:%Y-%m-%d}, {len(of[0]):,} one-minute bars. "
+                     f"The '{OF_WINDOW}' table compares all strategies over exactly these dates.")
     lines.append(f"Costs: ${eng.commission:.2f}/contract/side, {eng.slippage_ticks} tick slippage on market & stop fills. "
                  f"Intrabar fills: {eng.intrabar}.")
     lines.append("")
     lines.append("## Settings")
     lines.append("")
-    lines.append("```json\n" + json.dumps({"tjr": dataclasses.asdict(tjr_cfg), "sma": dataclasses.asdict(ma_cfg)},
+    lines.append("```json\n" + json.dumps({"tjr": dataclasses.asdict(tjr_cfg), "of": dataclasses.asdict(of_cfg), "sma": dataclasses.asdict(ma_cfg)},
                                           indent=1, default=str) + "\n```")
-    for period in ["Full", "Train", "Test"]:
+    for period in ["Full", "Train", "Test", OF_WINDOW]:
         cols = [n for n in tables if period in tables[n]]
         if not cols:
             continue
@@ -215,6 +246,10 @@ def main(argv=None) -> int:
     start = lines.index(f"## {shown}")
     stop = next((k for k in range(start + 1, len(lines)) if lines[k].startswith("## ")), len(lines))
     print("\n".join(lines[start:stop]))
+    if extra and f"## {OF_WINDOW}" in lines:
+        k0 = lines.index(f"## {OF_WINDOW}")
+        k1 = next((k for k in range(k0 + 1, len(lines)) if lines[k].startswith("## ")), len(lines))
+        print("\n".join(lines[k0:k1]))
     print(f"\nWrote {out}/summary.md, {out}/equity.png and trade lists.")
     return 0
 

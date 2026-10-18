@@ -78,13 +78,17 @@ def summarize(equity: pd.Series, trades: pd.DataFrame, in_position: pd.Series | 
     return out
 
 
-def split_results(res: dict, trades: pd.DataFrame, split: pd.Timestamp | None) -> dict[str, dict]:
-    """Metrics for the full run and, if a split date is given, train and test periods."""
+def split_results(res: dict, trades: pd.DataFrame, split: pd.Timestamp | None, extra: dict | None = None) -> dict[str, dict]:
+    """Metrics for the full run, train/test periods if a split date is given, and
+    any `extra` named periods {name: (start, end)} (e.g. the order-flow data window)."""
     eq, inpos = res["equity"], res["in_position"]
     periods = {"Full": (eq.index[0], eq.index[-1] + pd.Timedelta(seconds=1))}
     if split is not None and eq.index[0] < split < eq.index[-1]:
         periods["Train"] = (eq.index[0], split)
         periods["Test"] = (split, eq.index[-1] + pd.Timedelta(seconds=1))
+    for name, (a, b) in (extra or {}).items():
+        if ((eq.index >= a) & (eq.index < b)).sum() > 1:
+            periods[name] = (a, b)
     out = {}
     for name, (a, b) in periods.items():
         m = (eq.index >= a) & (eq.index < b)
