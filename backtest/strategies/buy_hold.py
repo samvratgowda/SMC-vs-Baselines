@@ -1,7 +1,9 @@
 """Baseline 2: buy and hold.
 
 Buys at the first bar and holds to the end. The number of contracts is set so
-the position's notional value roughly equals starting capital (no leverage),
+the position's notional value, at the real traded price, roughly equals
+starting capital (no leverage). The count stays fixed afterwards, so as equity
+grows or shrinks the exposure drifts away from exactly 1x,
 which is what "holding the index" means for an account of this size. Each
 quarterly roll is charged a round-trip commission plus slippage, because a
 real futures holder has to sell the old contract and buy the new one.
@@ -30,7 +32,10 @@ class BuyHoldStrategy(Strategy):
         # bar index at (or right after) each roll
         pos = bars.index.searchsorted(self.roll_times) if len(self.roll_times) else np.array([], int)
         self.roll_bars = set(int(p) for p in pos if 0 < p < len(bars))
-        self.qty = max(1, math.floor(broker.cfg.initial_capital / (self.c[0] * broker.cfg.point_value)))
+        # Size on the real contract price, not the back-adjusted one (which is
+        # shifted by later roll gaps and would buy the wrong number of contracts).
+        px = bars["raw_close"].to_numpy(float) if "raw_close" in bars else self.c
+        self.qty = max(1, math.floor(broker.cfg.initial_capital / (px[0] * broker.cfg.point_value)))
         self.n_rolls = 0
 
     def on_bar(self, i: int, b) -> None:

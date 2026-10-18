@@ -88,6 +88,8 @@ class SMARSIStrategy(Strategy):
         self.sma_fast[ends], self.sma_slow[ends], self.rsi[ends] = f, s, r
 
         self.c = c
+        # Real traded price for sizing; P&L still uses roll-adjusted price changes.
+        self.size_px = bars["raw_close"].to_numpy(float) if "raw_close" in bars else c
         self.bcfg = broker.cfg
         pos = bars.index.searchsorted(self.roll_times) if len(self.roll_times) else np.array([], int)
         self.roll_bars = set(int(p) for p in pos if 0 < p < n)
@@ -126,7 +128,7 @@ class SMARSIStrategy(Strategy):
     def _enter(self, i: int, b, d: int) -> None:
         """strategy.entry with percent_of_equity sizing; reverses an opposite position."""
         bc = self.bcfg
-        qty = math.floor(b.equity * self.cfg.pct_equity / 100 / (self.c[i] * bc.point_value))
+        qty = math.floor(b.equity * self.cfg.pct_equity / 100 / (self.size_px[i] * bc.point_value))
         if qty < 1:
             return                    # TradingView places no order when qty rounds to 0
         if b.position != 0:

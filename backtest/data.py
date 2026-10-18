@@ -45,6 +45,7 @@ def back_adjust(df: pd.DataFrame) -> tuple[pd.DataFrame, list[Roll]]:
     minute of real movement across the roll is also removed (negligible).
     """
     df = df.copy()
+    df["raw_close"] = df["close"]     # real traded price, kept for position sizing
     if "instrument_id" not in df.columns:
         return df, []
     ids = df["instrument_id"].to_numpy()
@@ -73,6 +74,8 @@ def resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
         agg["volume"] = "sum"
     if "instrument_id" in df.columns:
         agg["instrument_id"] = "last"
+    if "raw_close" in df.columns:
+        agg["raw_close"] = "last"
     out = df.resample(rule, label="left", closed="left").agg(agg)
     return out.dropna(subset=["open"])
 
@@ -84,6 +87,7 @@ def prepare(path: str, adjust: bool = True) -> tuple[pd.DataFrame, pd.DataFrame,
         raw, rolls = back_adjust(raw)
     else:
         _, rolls = back_adjust(raw)   # still report where the rolls were
+        raw["raw_close"] = raw["close"]
     return raw, resample(raw, "5min"), rolls
 
 

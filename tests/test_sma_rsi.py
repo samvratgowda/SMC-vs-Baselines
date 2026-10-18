@@ -49,7 +49,8 @@ def test_signals_follow_the_rules_and_fill_next_session_open(setup):
         # fills on the first bar of the next trading day
         assert td[i + 1] != td[i] and bars.index[i + 1] in times
         # 100% of equity (marked at this close) in notional, whole contracts
-        assert qty == int(res["equity"].iloc[i] // (bars["close"].iloc[i] * 5))
+        # sized on the real traded price, not the back-adjusted one
+        assert qty == int(res["equity"].iloc[i] // (bars["raw_close"].iloc[i] * 5))
 
 
 def test_always_in_market_after_first_entry_and_reverses(setup):
@@ -67,3 +68,16 @@ def test_long_only_closes_instead_of_shorting(setup):
     res = run(bars, s, EngineConfig())
     assert res["trades"] and all(t.direction == 1 for t in res["trades"])
     assert s.n_closes > 0
+
+
+def test_sizing_uses_real_price_not_back_adjusted():
+    """Back-adjusting shifts old prices by later roll gaps; contracts must be
+    sized on what the contract actually traded at."""
+    from backtest.strategies import BuyHoldStrategy
+    mes, _ = make_pair(start="2023-01-08", end="2024-01-07", seed=11)    # 4 rolls, +12 pts each
+    adj, rolls = back_adjust(mes)
+    bars = resample(adj, "5min")
+    assert (bars["close"].iloc[0] - bars["raw_close"].iloc[0]) == pytest.approx(sum(r.gap for r in rolls))
+    s = BuyHoldStrategy([r.time for r in rolls])
+    run(bars, s, EngineConfig())
+    assert s.qty == int(100_000 // (bars["raw_close"].iloc[0] * 5))
