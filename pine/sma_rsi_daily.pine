@@ -1,0 +1,47 @@
+//@version=6
+// =============================================================================
+// Baseline: daily SMA trend + RSI pullback, stop-and-reverse.
+// Instrument: S&P 500 futures (MES1! recommended). Chart timeframe: 1 DAY.
+//
+// Python port: backtest/strategies/sma_rsi.py
+//
+// RULES
+//  - Signals are read at the daily close; the order fills at the next open.
+//  - Long  when SMA(20) > SMA(50) and RSI(9) < 30  (pullback in an uptrend).
+//  - Short when SMA(20) < SMA(50) and RSI(9) > 70  (rally in a downtrend).
+//  - Once in, a position is held until the opposite signal reverses it.
+//    No stops or targets.
+//  - Sized at 100% of equity, like the buy-and-hold benchmark. Futures trade in
+//    whole contracts, so use MES; ES may be too large for the account.
+//  - Set "Allow shorts" off to get the long-only version: a short signal then
+//    closes the long instead.
+// Fix the lengths and thresholds BEFORE testing; do not pick them from results.
+// Use the same continuous-contract settings (back-adjusted or not) in every test.
+// =============================================================================
+strategy("Baseline: SMA 20/50 + RSI 9 (daily, 100% equity)", overlay = true,
+     initial_capital = 100000, pyramiding = 0,
+     default_qty_type = strategy.percent_of_equity, default_qty_value = 100,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 1.0,
+     slippage = 1, calc_on_every_tick = false, process_orders_on_close = false)
+
+smaLen1     = input.int(20, "Fast SMA length (days)", minval = 2)
+smaLen2     = input.int(50, "Slow SMA length (days)", minval = 2)
+allowShorts = input.bool(true, "Allow shorts")
+
+float smaV1 = ta.sma(close, smaLen1)
+float smaV2 = ta.sma(close, smaLen2)
+float rsi1  = ta.rsi(close, 9)
+
+bool goLong  = smaV1 > smaV2 and rsi1 < 30
+bool goShort = smaV1 < smaV2 and rsi1 > 70
+
+if goLong and strategy.position_size <= 0
+    strategy.entry("Long", strategy.long)
+else if goShort and strategy.position_size >= 0
+    if allowShorts
+        strategy.entry("Short", strategy.short)
+    else
+        strategy.close_all(comment = "Short signal, long-only")
+
+plot(smaV1, "Fast SMA", color.orange)
+plot(smaV2, "Slow SMA", color.yellow)

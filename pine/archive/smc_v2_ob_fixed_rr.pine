@@ -1,0 +1,419 @@
+//@version=6
+// =============================================================================
+// SMC v2 + Order Blocks: 1h liquidity sweep → 1h FVG *or* Order Block → retrace
+// → 5m BOS inside session → entry. Take profit is a fixed multiple of risk.
+// RUN ON THE 5-MINUTE CHART (MES1! recommended).
+// =============================================================================
+strategy("SMC v2 + Order Blocks (1h Sweep → FVG/OB → 5m BOS, fixed RR)", overlay = true,
+     initial_capital = 100000, pyramiding = 0,
+     default_qty_type = strategy.fixed, default_qty_value = 1,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 1.0,
+     slippage = 1, calc_on_every_tick = false, process_orders_on_close = false)
+
+// ---------------------------- Inputs ----------------------------------------
+hrLen        = input.int(2, "1h swing length (hours each side)", minval = 1)
+pivLen5      = input.int(3, "5m swing length (bars each side)", minval = 1)
+maxSetupHrs  = input.int(48, "Setup lifetime (1h bars after the sweep)", minval = 3)
+targetRR     = input.float(1.5, "Take profit (reward:risk)", minval = 0.1, step = 0.25)
+stopBuf      = input.float(0.0, "Stop buffer beyond zone edge (points)", minval = 0.0, step = 0.25)
+riskPct      = input.float(0.5, "Risk per trade (% of equity)", minval = 0.05, step = 0.05)
+minRiskAtr   = input.float(0.3, "Skip if risk < this many ATR(14, 5m)", minval = 0.0, step = 0.1)
+startHr      = input.int(8, "Trading window start: hour (ET)", minval = 0, maxval = 23)
+startMin     = input.int(0, "Trading window start: minute", minval = 0, maxval = 59)
+endHr        = input.int(11, "Trading window end: hour (ET, exclusive)", minval = 0, maxval = 23)
+endMin       = input.int(0, "Trading window end: minute", minval = 0, maxval = 59)
+flattenAtEnd = input.bool(true, "Flatten open trades at the end of the window")
+useNews      = input.bool(true, "Skip news days (dates listed below)")
+newsDates    = input.text_area("", "Blocked dates, format YYYY-MM-DD, one per line")
+showDiag     = input.bool(true, "Show funnel table")
+useOB        = input.bool(true, "Enable Order Block setups")
+useFVG       = input.bool(true, "Enable Fair Value Gap setups")
+
+// ---------------------------- Time helpers ----------------------------------
+tz = "America/New_York"
+
+inWin(int t) =>
+    int m = hour(t, tz) * 60 + minute(t, tz)
+    int d = dayofweek(t, tz)
+    m >= startHr * 60 + startMin and m < endHr * 60 + endMin and d != dayofweek.saturday and d != dayofweek.sunday
+
+string dayStr    = str.format_time(time, "yyyy-MM-dd", tz)
+bool newsBlocked = useNews and str.contains(newsDates, dayStr)
+bool inSession   = inWin(time)
+bool nextIn      = inWin(time_close)
+bool canTrade    = inSession and not newsBlocked
+bool holdNext    = nextIn and not newsBlocked
+
+// ---------------------------- Helper functions ------------------------------
+f_isPivotHigh(array<float> arr, int c, int len) =>
+    float v = array.get(arr, c)
+    bool ok = true
+    for k = 1 to len
+        if array.get(arr, c - k) >= v or array.get(arr, c + k) >= v
+            ok := false
+    ok
+
+f_isPivotLow(array<float> arr, int c, int len) =>
+    float v = array.get(arr, c)
+    bool ok = true
+    for k = 1 to len
+        if array.get(arr, c - k) <= v or array.get(arr, c + k) <= v
+            ok := false
+    ok
+
+f_row(table t, int r, string label, string a, string b) =>
+    table.cell(t, 0, r, label, text_color = color.white, bgcolor = color.new(color.black, 25), text_halign = text.align_left)
+    table.cell(t, 1, r, a, text_color = color.white, bgcolor = color.new(color.black, 25))
+    table.cell(t, 2, r, b, text_color = color.white, bgcolor = color.new(color.black, 25))
+    true
+
+// ---------------------------- Build 1h bars from 5m bars --------------------
+bool newHr = timeframe.change("60")
+var float aH = na
+var float aL = na
+var float aC = na
+var float aO = na
+bool  hrDone = false
+float dH = na
+float dL = na
+float dC = na
+float dO = na
+if newHr and not na(aH)
+    hrDone := true
+    dH := aH
+    dL := aL
+    dC := aC
+    dO := aO
+if newHr or na(aH)
+    aH := high
+    aL := low
+    aC := close
+    aO := open
+else
+    aH := math.max(aH, high)
+    aL := math.min(aL, low)
+    aC := close
+
+// ---------------------------- State -----------------------------------------
+var array<float> hHi = array.new<float>()
+var array<float> hLo = array.new<float>()
+var array<float> hOp = array.new<float>()
+var array<float> hCl = array.new<float>()
+var int   hrIdx = 0
+var float swH1  = na
+var float swL1  = na
+var float usedSwL1 = na
+var float usedSwH1 = na
+
+// Long setup (can be FVG or OB)
+var int   lStage = 0      // 0 none, 1 swept, 2 zone formed, 3 retraced
+var int   lSweepHr = na
+var float lGTop = na
+var float lGBot = na
+var int   lRetraceBar = na
+var float usedBosL = na
+var string lType = ""     // "FVG" or "OB"
+
+// Short setup
+var int   sStage = 0
+var int   sSweepHr = na
+var float sGTop = na
+var float sGBot = na
+var int   sRetraceBar = na
+var float usedBosS = na
+var string sType = ""
+
+var int openDir = 0
+
+// Active trade levels (for plotting)
+var float tradeTP = na
+var float tradeSL = na
+
+// Funnel counters
+var int nSweepL = 0
+var int nSweepS = 0
+var int nFvgL = 0
+var int nFvgS = 0
+var int nObL = 0
+var int nObS = 0
+var int nRetL = 0
+var int nRetS = 0
+var int nBosL = 0
+var int nBosS = 0
+var int nBlockL = 0
+var int nBlockS = 0
+var int nRiskL = 0
+var int nRiskS = 0
+var int nEntL = 0
+var int nEntS = 0
+var int nReplL = 0
+var int nReplS = 0
+var int nExpL = 0
+var int nExpS = 0
+var int nInvL = 0
+var int nInvS = 0
+
+// 5m swings
+var float lastSH5 = na
+var float lastSL5 = na
+float ph5  = ta.pivothigh(high, pivLen5, pivLen5)
+float pl5  = ta.pivotlow(low, pivLen5, pivLen5)
+float atrV = ta.atr(14)
+if not na(ph5)
+    lastSH5 := ph5
+if not na(pl5)
+    lastSL5 := pl5
+
+bool flat   = strategy.position_size == 0
+bool resetL = false
+bool resetS = false
+
+if strategy.closedtrades > strategy.closedtrades[1]
+    if openDir == 1
+        resetL := true
+    if openDir == -1
+        resetS := true
+    openDir := 0
+
+if not holdNext and flattenAtEnd
+    strategy.close_all(comment = "Flat at window end")
+
+// ---------------------------- 1h events -------------------------------------
+if hrDone
+    array.push(hHi, dH)
+    array.push(hLo, dL)
+    array.push(hOp, dO)
+    array.push(hCl, dC)
+    if array.size(hHi) > 300
+        array.shift(hHi)
+        array.shift(hLo)
+        array.shift(hOp)
+        array.shift(hCl)
+    hrIdx += 1
+    int n = array.size(hHi)
+
+    // 1h swings
+    if n >= 2 * hrLen + 1
+        int c = n - 1 - hrLen
+        if f_isPivotHigh(hHi, c, hrLen)
+            swH1 := array.get(hHi, c)
+        if f_isPivotLow(hLo, c, hrLen)
+            swL1 := array.get(hLo, c)
+
+    // New sweeps. A fresh sweep replaces an older setup that is still waiting
+    // (swept but no zone yet, or zone formed but not yet retraced). Setups that
+    // have already retraced into their zone (stage 3) are kept until they
+    // trigger, expire or are invalidated.
+    bool sweepL = not na(swL1) and (na(usedSwL1) or swL1 != usedSwL1) and dL < swL1 and dC > swL1
+    bool sweepS = not na(swH1) and (na(usedSwH1) or swH1 != usedSwH1) and dH > swH1 and dC < swH1
+    if sweepL and lStage <= 2 and openDir != 1
+        if lStage != 0
+            nReplL += 1
+        lGTop := na
+        lGBot := na
+        lRetraceBar := na
+        usedBosL := na
+        lType := ""
+        resetL := false
+        lStage := 1
+        lSweepHr := hrIdx
+        usedSwL1 := swL1
+        nSweepL += 1
+    if sweepS and sStage <= 2 and openDir != -1
+        if sStage != 0
+            nReplS += 1
+        sGTop := na
+        sGBot := na
+        sRetraceBar := na
+        usedBosS := na
+        sType := ""
+        resetS := false
+        sStage := 1
+        sSweepHr := hrIdx
+        usedSwH1 := swH1
+        nSweepS += 1
+
+    // ========== FVG after sweep ==========
+    if useFVG and lStage == 1 and n >= 3 and (hrIdx - 2) >= lSweepHr
+        float c1High = array.get(hHi, n - 3)
+        float c3Low  = array.get(hLo, n - 1)
+        if c3Low > c1High
+            lGBot := c1High
+            lGTop := c3Low
+            lStage := 2
+            lType := "FVG"
+            nFvgL += 1
+    if useFVG and sStage == 1 and n >= 3 and (hrIdx - 2) >= sSweepHr
+        float c1Low  = array.get(hLo, n - 3)
+        float c3High = array.get(hHi, n - 1)
+        if c3High < c1Low
+            sGTop := c1Low
+            sGBot := c3High
+            sStage := 2
+            sType := "FVG"
+            nFvgS += 1
+
+    // ========== Order Block after sweep ==========
+    // Bullish OB: last bearish candle before a strong bullish candle (after the sweep)
+    if useOB and lStage == 1 and n >= 4 and (hrIdx - 1) >= lSweepHr
+        float lastOpen  = array.get(hOp, n - 1)
+        float lastClose = array.get(hCl, n - 1)
+        bool lastBullish = lastClose > lastOpen
+
+        float prevOpen  = array.get(hOp, n - 2)
+        float prevClose = array.get(hCl, n - 2)
+        float prevHigh  = array.get(hHi, n - 2)
+        float prevLow   = array.get(hLo, n - 2)
+        bool prevBearish = prevClose < prevOpen
+
+        // Strong bullish displacement: last candle is bullish and closes above previous high
+        if lastBullish and prevBearish and lastClose > prevHigh
+            lGBot := prevLow
+            lGTop := prevHigh
+            lStage := 2
+            lType := "OB"
+            nObL += 1
+
+    if useOB and sStage == 1 and n >= 4 and (hrIdx - 1) >= sSweepHr
+        float lastOpen  = array.get(hOp, n - 1)
+        float lastClose = array.get(hCl, n - 1)
+        bool lastBearish = lastClose < lastOpen
+
+        float prevOpen  = array.get(hOp, n - 2)
+        float prevClose = array.get(hCl, n - 2)
+        float prevHigh  = array.get(hHi, n - 2)
+        float prevLow   = array.get(hLo, n - 2)
+        bool prevBullish = prevClose > prevOpen
+
+        if lastBearish and prevBullish and lastClose < prevLow
+            sGTop := prevHigh
+            sGBot := prevLow
+            sStage := 2
+            sType := "OB"
+            nObS += 1
+
+    // Expiry
+    if lStage != 0 and not resetL and hrIdx - lSweepHr > maxSetupHrs
+        resetL := true
+        nExpL += 1
+    if sStage != 0 and not resetS and hrIdx - sSweepHr > maxSetupHrs
+        resetS := true
+        nExpS += 1
+
+// ---------------------------- 5m tracking -----------------------------------
+if lStage >= 2 and not resetL and close < lGBot
+    resetL := true
+    nInvL += 1
+if sStage >= 2 and not resetS and close > sGTop
+    resetS := true
+    nInvS += 1
+
+bool retraceL = lStage == 2 and not resetL and low <= lGTop
+bool retraceS = sStage == 2 and not resetS and high >= sGBot
+
+if retraceL
+    lStage := 3
+    lRetraceBar := bar_index
+    nRetL += 1
+if retraceS
+    sStage := 3
+    sRetraceBar := bar_index
+    nRetS += 1
+
+// ---------------------------- 5m BOS and entry ------------------------------
+bool startOK = canTrade and holdNext and flat
+
+bool longBos  = lStage == 3 and not resetL and bar_index > lRetraceBar and not na(lastSH5) and close > lastSH5 and close[1] <= lastSH5 and (na(usedBosL) or lastSH5 != usedBosL)
+bool shortBos = sStage == 3 and not resetS and bar_index > sRetraceBar and not na(lastSL5) and close < lastSL5 and close[1] >= lastSL5 and (na(usedBosS) or lastSL5 != usedBosS)
+
+if longBos and not startOK
+    nBlockL += 1
+if shortBos and not startOK
+    nBlockS += 1
+
+if startOK and longBos
+    usedBosL := lastSH5
+    nBosL += 1
+    float entryPx = close
+    float stopPx  = math.round_to_mintick(lGBot - stopBuf)
+    float riskPts = entryPx - stopPx
+    if not (riskPts > 0 and riskPts >= minRiskAtr * atrV)
+        nRiskL += 1
+    else
+        // Take profit placed at a fixed multiple of risk above entry
+        float tpPx = math.round_to_mintick(entryPx + targetRR * riskPts)
+        int qty = int(math.max(1, math.floor(strategy.equity * riskPct / 100 / (riskPts * syminfo.pointvalue))))
+        strategy.entry("Long", strategy.long, qty = qty)
+        strategy.exit("Long exit", from_entry = "Long", stop = stopPx, limit = tpPx)
+        tradeTP := tpPx
+        tradeSL := stopPx
+        openDir := 1
+        nEntL += 1
+
+else if startOK and shortBos
+    usedBosS := lastSL5
+    nBosS += 1
+    float entryPx = close
+    float stopPx  = math.round_to_mintick(sGTop + stopBuf)
+    float riskPts = stopPx - entryPx
+    if not (riskPts > 0 and riskPts >= minRiskAtr * atrV)
+        nRiskS += 1
+    else
+        // Take profit placed at a fixed multiple of risk below entry
+        float tpPx = math.round_to_mintick(entryPx - targetRR * riskPts)
+        int qty = int(math.max(1, math.floor(strategy.equity * riskPct / 100 / (riskPts * syminfo.pointvalue))))
+        strategy.entry("Short", strategy.short, qty = qty)
+        strategy.exit("Short exit", from_entry = "Short", stop = stopPx, limit = tpPx)
+        tradeTP := tpPx
+        tradeSL := stopPx
+        openDir := -1
+        nEntS += 1
+
+// ---------------------------- Apply resets ----------------------------------
+if resetL
+    lStage := 0
+    lSweepHr := na
+    lGTop := na
+    lGBot := na
+    lRetraceBar := na
+    usedBosL := na
+    lType := ""
+if resetS
+    sStage := 0
+    sSweepHr := na
+    sGTop := na
+    sGBot := na
+    sRetraceBar := na
+    usedBosS := na
+    sType := ""
+
+// ---------------------------- Visuals ---------------------------------------
+if barstate.islast and timeframe.period != "5"
+    label.new(bar_index, high, "Run this script on the 5-minute chart", color = color.red, textcolor = color.white)
+
+plot(lStage >= 2 ? lGTop : na, "Long zone top", color.new(color.green, 40), style = plot.style_linebr)
+plot(lStage >= 2 ? lGBot : na, "Long zone bottom", color.new(color.green, 40), style = plot.style_linebr)
+plot(sStage >= 2 ? sGTop : na, "Short zone top", color.new(color.red, 40), style = plot.style_linebr)
+plot(sStage >= 2 ? sGBot : na, "Short zone bottom", color.new(color.red, 40), style = plot.style_linebr)
+
+bool inPos = strategy.position_size != 0
+plot(inPos ? tradeTP : na, "Take profit", color.new(color.lime, 0), style = plot.style_linebr, linewidth = 2)
+plot(inPos ? tradeSL : na, "Stop loss", color.new(color.fuchsia, 0), style = plot.style_linebr, linewidth = 2)
+
+bgcolor(canTrade ? color.new(color.gray, 94) : na)
+
+// ---------------------------- Funnel table ----------------------------------
+var table diag = table.new(position.top_right, 3, 12, border_width = 1)
+if barstate.islast and showDiag
+    f_row(diag, 0, "Funnel", "Long", "Short")
+    f_row(diag, 1, "1h sweeps", str.tostring(nSweepL), str.tostring(nSweepS))
+    f_row(diag, 2, "Replaced by newer sweep", str.tostring(nReplL), str.tostring(nReplS))
+    f_row(diag, 3, "FVG formed", str.tostring(nFvgL), str.tostring(nFvgS))
+    f_row(diag, 4, "Order Block formed", str.tostring(nObL), str.tostring(nObS))
+    f_row(diag, 5, "Invalidated (closed through zone)", str.tostring(nInvL), str.tostring(nInvS))
+    f_row(diag, 6, "Expired", str.tostring(nExpL), str.tostring(nExpS))
+    f_row(diag, 7, "Retraced into zone", str.tostring(nRetL), str.tostring(nRetS))
+    f_row(diag, 8, "BOS in window", str.tostring(nBosL), str.tostring(nBosS))
+    f_row(diag, 9, "BOS outside window", str.tostring(nBlockL), str.tostring(nBlockS))
+    f_row(diag, 10, "Skipped: risk too small", str.tostring(nRiskL), str.tostring(nRiskS))
+    f_row(diag, 11, "Entries", str.tostring(nEntL), str.tostring(nEntS))
