@@ -287,9 +287,8 @@ More detail: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md#limitations).
 
 ## How this was built
 
-<!-- Edit this so it matches exactly what you did. -->
 I designed the research question, chose the strategies and baselines, fixed
 the rules and settings before running the real data, ran the experiments and
-interpreted the results. Most of the code was written with an AI assistant
-(Claude). I reviewed it, ran the test suite, and can explain how each part
+interpreted the results. Most of the code was written with an AI assistant. 
+I reviewed and fine tuned it, ran the test suite, and can explain how each part
 works.
