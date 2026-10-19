@@ -78,8 +78,8 @@ exploration, not as new rules.
 | **SMA + RSI(2) (Connors)** | Daily bars. Long when the close is above its 200-day SMA and RSI(2) < 10; short when below the 200-day SMA and RSI(2) > 90. Flat between trades. Sized at 100% of equity. From Connors & Alvarez, *Short Term Trading Strategies That Work* (2008); Pine version: `pine/sma_rsi_daily.pine`. | none | close back across the 5-day SMA |
 | **Buy & hold** | Buy at the start, hold to the end, roll each quarter. Sized so notional ≈ starting capital (no leverage). | none | none |
 
-The SMC strategy day trades: one position at a time, 2% of equity risked
-per trade in the reported run (capped at 100 contracts), and anything still open is closed at
+The SMC strategy day trades: one position at a time, 1% of equity risked
+per trade (capped at 100 contracts), and anything still open is closed at
 16:00 ET. There is no daily trade cap beyond that. It runs on 1-minute bars
 because its entry is a 1-minute confirmation; its 5-minute, hourly and
 4-hour bars are built from completed 1-minute bars, so it only ever sees what

@@ -64,9 +64,9 @@ smtSym  = input.symbol("CME_MINI:MNQ1!", "SMT comparison symbol", group = gF)
 gR = "Risk"
 targetRR   = input.float(1.5, "Take profit (reward:risk)", minval = 0.1, step = 0.25, group = gR)
 stopBuf    = input.float(0.0, "Stop buffer beyond the sweep extreme (points)", minval = 0.0, step = 0.25, group = gR)
-riskPct    = input.float(0.5, "Risk per trade (% of equity)", minval = 0.05, step = 0.05, group = gR)
+riskPct    = input.float(1.0, "Risk per trade (% of equity)", minval = 0.05, step = 0.05, group = gR)
 minRiskAtr = input.float(0.3, "Skip if risk < this many ATR(14, 5m)", minval = 0.0, step = 0.1, group = gR)
-maxQty     = input.int(10, "Max contracts per trade", minval = 1, group = gR)
+maxQty     = input.int(100, "Max contracts per trade", minval = 1, group = gR)
 
 gD = "Display"
 showLevels = input.bool(true, "Show liquidity levels", group = gD)

@@ -39,7 +39,7 @@ Longs are described; shorts are the exact mirror.
 | Entry window | the 1m confirmation must be between 08:00 and 11:00 ET (fill before 11:00) | Model 2022 is usually executed "inside the London or New York morning killzones"; the exact hours are a project setting |
 | Setup life | ends at the CME day boundary (18:00 ET), when it's used for an entry decision (even if blocked), or when price makes a new low after step 4 (the sweep low would be the stop) | **(choice)** |
 | Positions | one at a time, no daily cap; closed at 16:00 ET if still open | no overnight holds is a **(choice)** for a day-trading test |
-| Risk | 2% of equity per trade in the reported run, 1–100 MES contracts | project setting |
+| Risk | 1% of equity per trade, 1–100 MES contracts | the common "1% rule"; [a guide to ICT money management](https://www.brokerxplorer.com/article/ict-money-management-protecting-capital-and-maximizing-gains-6496) says ICT traders typically risk 1–2% and advises "a maximum of 1% risk every single trade". The 100-contract cap only stops tiny stops from producing huge positions. |
 | Timeframes | 4h bias, 1h liquidity, 5m structure, 1m entry, all built from completed 1-minute bars | as above |
 
 ## Left out on purpose

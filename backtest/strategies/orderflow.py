@@ -22,7 +22,7 @@ MEAN REVERSION MODEL (failed breakout -> back to balance), longs described:
     6. Target    the balance POC (previous day's POC), >= 1R away
 
 Shorts are the mirror image. Entries 08:00-11:00 ET, one position at a time,
-2% risk per trade (1-100 contracts), flat by 16:00 ET. Every value used on a bar is known at that bar's
+0.5% risk per trade (1-100 contracts), flat by 16:00 ET. Every value used on a bar is known at that bar's
 close. ORDERFLOW_RULES.md lists the source of each rule and marks the
 choices made where the sources don't give numbers.
 """
@@ -61,7 +61,7 @@ class FabioConfig:
     min_target_rr: float = 1.0
     poc_lookback_days: int = 20    # trend target: POCs of this many previous days
     swing_len: int = 2
-    risk_pct: float = 2.0
+    risk_pct: float = 0.5
     max_qty: int = 100
     news_dates: tuple = ()
 

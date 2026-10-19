@@ -58,14 +58,18 @@ statistics are in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 |---|---|---|---|---|---|---|
 | **Buy & hold** | Jan 2021 – Oct 2026 | 1 | – | **+76.9%** | 0.69 | −23.7% |
 | SMA + RSI(2) (Connors) | Jan 2021 – Oct 2026 | 63 | – | +25.7% | **0.74** | **−8.5%** |
-| SMC: ICT model | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −54.5% | −0.43 | −65.0% |
-| Order flow: Fabio model | Apr 2026 – Oct 2026 | 124 | −0.46 (−0.76 to −0.14) | −67.9% | −3.45 | −72.9% |
+| SMC: ICT model | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −28.9% | −0.42 | −39.3% |
+| Order flow: Fabio model | Apr 2026 – Oct 2026 | 124 | −0.46 (−0.76 to −0.14) | −27.4% | −3.68 | −31.3% |
 
 - **R** is the ratio of the trade's profit to the amount risked. The 95%
   confidence interval comes from 10,000 bootstrap resamples of the trades.
   An interval that includes zero means the sample can't tell an edge from luck.
-- Both day-trading models risk 2% of equity per trade (1–100 contracts).
-  Average R doesn't depend on position size; return, Sharpe and drawdown do.
+- Each day-trading model risks what its own sources recommend: 1% of equity
+  per trade for SMC (the common "1% rule", which ICT money-management guides
+  give as a maximum) and 0.5% for order flow (the top of Fabio's 0.25–0.5%).
+  These sizes were set after the first run; they change only the dollar
+  figures, not which trades were taken or their R. So compare **average R**
+  across the two models; return, Sharpe and drawdown depend on position size.
   Buy-and-hold and RSI(2) have no stop, so no R.
 - Order-flow data costs much more than candle data for SMC so that test covers
   6.5 months instead of 5.8 years.
@@ -96,16 +100,15 @@ and minutes in a random direction.
 
 | | Trades | Avg R (95% CI) | Return | Sharpe |
 |---|---|---|---|---|
-| Train, 2021–2024 | 234 | −0.10 (−0.30 to +0.12) | −45.2% | −0.49 |
-| Test, 2025 – Oct 2026 | 121 | −0.06 (−0.32 to +0.22) | −17.1% | −0.41 |
-| **Full** | **355** | **−0.08 (−0.24 to +0.08)** | −54.5% | −0.43 |
+| Train, 2021–2024 | 234 | −0.10 (−0.30 to +0.12) | −23.2% | −0.47 |
+| Test, 2025 – Oct 2026 | 121 | −0.06 (−0.32 to +0.22) | −7.5% | −0.41 |
+| **Full** | **355** | **−0.08 (−0.24 to +0.08)** | −28.9% | −0.42 |
 
 The rules lost money in both the training period and the held-out test
 period. The confidence interval includes zero, so on its own this is "no
 detectable edge"; together with the random-entry control, the signals added
-nothing. Win rate 34%, profit factor 0.80. The large drawdown (−65%) comes
-mostly from risking 2% per trade on a losing strategy; at 0.5% per trade the
-same trades would have drawn down roughly a quarter as much.
+nothing. Win rate 34%, profit factor 0.84. At 1% risk per trade the account fell
+28.9%, with a maximum drawdown of −39.3%.
 
 Where setups dropped out at each step: see the [setup funnels](docs/METHODOLOGY.md#setup-funnels).
 
@@ -113,9 +116,9 @@ Where setups dropped out at each step: see the [setup funnels](docs/METHODOLOGY.
 
 124 trades from April 5 to October 16, 2026 averaged **−0.46R** per trade
 after costs (95% CI −0.76 to −0.14), the only strategy whose loss is
-statistically clear. Win rate 19%, profit factor 0.55. At 2% risk per trade,
-losing about half a risk unit per trade cost 68% of the account in six and a
-half months (max drawdown −73%).
+statistically clear. Win rate 19%, profit factor 0.51. At 0.5% risk per trade,
+losing about half a risk unit per trade cost 27% of the account in six and a
+half months (max drawdown −31%).
 
 | | Avg R per trade |
 |---|---|
@@ -169,8 +172,8 @@ April 5 – October 16, 2026, the period covered by the order-flow data:
 |---|---|---|---|---|---|
 | **Buy & hold** | **+16.2%** | **1.94** | −5.1% | 0 | – |
 | SMA + RSI(2) (Connors) | +4.4% | 1.54 | −1.8% | 8 | – |
-| SMC: ICT model | −17.4% | −1.17 | −27.9% | 42 | −0.21 |
-| Order flow: Fabio model | −67.9% | −3.45 | −72.9% | 124 | −0.46 |
+| SMC: ICT model | −8.6% | −1.19 | −14.6% | 42 | −0.21 |
+| Order flow: Fabio model | −27.4% | −3.68 | −31.3% | 124 | −0.46 |
 
 ![The same six months for all four strategies, each restarted at $100k](docs/equity_orderflow_window.png)
 
