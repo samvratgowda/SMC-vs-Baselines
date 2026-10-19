@@ -11,12 +11,12 @@ Concepts (SMC) model built from the Inner Circle Trader's (ICT) concepts and
 Fabio Valentini's order-flow model, have an edge on S&P 500 futures once their
 rules are written down and tested properly?
 
-**Method:** Each method has fixed rules to enter a trade on  Micro E-mini
-S&P 500 (MES) futures using 1-minute candle data from January2021 to October 
-2026 including trading costs.The 2 strategies are compared with buy-and-hold, 
-a classic SMA + RSI strategy, and a **random-entry control** (500 runs with 
-the same stops, targets and costs but random entries). Rules were fixed 
-before the real data was run so there was no bias towards the specific 
+**Method:** Each method has fixed rules to enter a trade on Micro E-mini
+S&P 500 (MES) futures using 1-minute candle data from January 2021 to October
+2026, including trading costs. The 2 strategies are compared with buy-and-hold,
+a classic SMA + RSI strategy, and a **random-entry control** (500 runs with
+the same stops, targets and costs but random entries). Rules were fixed
+before the real data was run so there was no bias towards the specific
 chart's price action.
 
 **Findings:**
@@ -26,7 +26,7 @@ chart's price action.
   statistically clear loss. Most of it came from tight stops and costs;
   random entries with the same risk lost −0.31R.
 - **Buy-and-hold:** +76.9%, the highest return.
-- **SMA + RSI(2):** +25.7% with a similar Sharpe ratio (risk free return) to
+- **SMA + RSI(2):** +25.7% with a similar Sharpe ratio (return per unit of risk) to
   buy-and-hold (0.74 vs 0.69) and about a third of the drawdown.
 
 ![Account equity of each strategy, $100k start](docs/equity.png)
@@ -59,14 +59,14 @@ statistics are in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 | **Buy & hold** | Jan 2021 – Oct 2026 | 1 | – | **+76.9%** | 0.69 | −23.7% |
 | SMA + RSI(2) (Connors) | Jan 2021 – Oct 2026 | 63 | – | +25.7% | **0.74** | **−8.5%** |
 | SMC: ICT model | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −54.5% | −0.43 | −65.0% |
-| Order flow: Fabio model | Apr 2026 – Oct 2026 | 124 | −0.46 (−0.76 to −0.14) | −12.0% | −3.57 | −13.4% |
+| Order flow: Fabio model | Apr 2026 – Oct 2026 | 124 | −0.46 (−0.76 to −0.14) | −67.9% | −3.45 | −72.9% |
 
 - **R** is the ratio of the trade's profit to the amount risked. The 95%
   confidence interval comes from 10,000 bootstrap resamples of the trades.
   An interval that includes zero means the sample can't tell an edge from luck.
-- Compare **Sharpe and average R**, not dollar returns. The SMC run risked 2%
-  of equity per trade and the order-flow run 0.5%, so their returns are on
-  different scales. Buy-and-hold and RSI(2) have no stop, so no R.
+- Both day-trading models risk 2% of equity per trade (1–100 contracts).
+  Average R doesn't depend on position size; return, Sharpe and drawdown do.
+  Buy-and-hold and RSI(2) have no stop, so no R.
 - Order-flow data costs much more than candle data for SMC so that test covers
   6.5 months instead of 5.8 years.
 
@@ -113,7 +113,9 @@ Where setups dropped out at each step: see the [setup funnels](docs/METHODOLOGY.
 
 124 trades from April 5 to October 16, 2026 averaged **−0.46R** per trade
 after costs (95% CI −0.76 to −0.14), the only strategy whose loss is
-statistically clear. Win rate 19%, profit factor 0.53.
+statistically clear. Win rate 19%, profit factor 0.55. At 2% risk per trade,
+losing about half a risk unit per trade cost 68% of the account in six and a
+half months (max drawdown −73%).
 
 | | Avg R per trade |
 |---|---|
@@ -167,8 +169,8 @@ April 5 – October 16, 2026, the period covered by the order-flow data:
 |---|---|---|---|---|---|
 | **Buy & hold** | **+16.2%** | **1.94** | −5.1% | 0 | – |
 | SMA + RSI(2) (Connors) | +4.4% | 1.54 | −1.8% | 8 | – |
-| Order flow: Fabio model | −12.0% | −3.57 | −13.4% | 124 | −0.46 |
 | SMC: ICT model | −17.4% | −1.17 | −27.9% | 42 | −0.21 |
+| Order flow: Fabio model | −67.9% | −3.45 | −72.9% | 124 | −0.46 |
 
 ![The same six months for all four strategies, each restarted at $100k](docs/equity_orderflow_window.png)
 
@@ -242,7 +244,7 @@ In screenshots 1 and 2 the target edge of the position box was drawn half a
 point off (7730.00 and 7884.00 instead of 7730.50 and 7884.50); this doesn't
 change either outcome.
 
-To reproduce: download the data (see Quick start), then
+To reproduce: download the data (see [Reproduce it](#reproduce-it)), then
 `python run_backtest.py --split 2025-01-01`. The settings used are printed at
 the top of `results/summary.md`.
 

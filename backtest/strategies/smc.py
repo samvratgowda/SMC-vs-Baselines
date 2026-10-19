@@ -13,7 +13,7 @@ Trader's (ICT) concepts, coded step by step. Runs on 1-minute bars.
     8. Target     the nearest untaken liquidity level at least 1R away
 
 (Longs described; shorts are the mirror image.) Entries 08:00-11:00 ET, one
-position at a time, 0.5% risk per trade, everything flat by 16:00 ET.
+position at a time, 2% risk per trade, everything flat by 16:00 ET.
 
 5-minute, 1-hour and 4-hour bars are built from COMPLETED 1-minute bars, so
 on every bar the strategy only knows what a trader watching live would know.

@@ -69,7 +69,7 @@ Longs described; shorts are the mirror image.
 | Entry window | 08:00–11:00 ET for both models | project setting. The source says the trend model "works best in the New York session" and the mean-reversion model in London or quiet conditions; one window keeps the comparison with SMC fair **(choice)** |
 | Setup life | ends at the CME day boundary, on invalidation, or when it's used for an entry decision | **(choice)** |
 | Positions | one at a time; closed at 16:00 ET if still open | **(choice)** |
-| Risk | 0.5% of equity per trade, 1–10 contracts | project setting; the source uses "0.25% to 0.5%" |
+| Risk | 2% of equity per trade, 1–100 contracts | project setting, the same as the SMC run so the two are on one scale; the source itself uses "0.25% to 0.5%" |
 
 ## Left out on purpose
 
