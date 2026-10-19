@@ -11,12 +11,13 @@ Concepts (SMC) model built from the Inner Circle Trader's (ICT) concepts and
 Fabio Valentini's order-flow model, have an edge on S&P 500 futures once their
 rules are written down and tested properly?
 
-**Method:** Each method coded as fixed, sourced rules; tested on Micro E-mini
-S&P 500 (MES) futures, 1-minute data from 2021 to October 2026, with trading
-costs; compared with buy-and-hold, a classic SMA + RSI strategy, and a
-**random-entry control** (500 runs with the same stops, targets and costs but
-random entries). Rules were fixed before the real data was run so there was no 
-bias towards the specific chart's price action.
+**Method:** Each method has fixed rules to enter a trade on  Micro E-mini
+S&P 500 (MES) futures using 1-minute candle data from January2021 to October 
+2026 including trading costs.The 2 strategies are compared with buy-and-hold, 
+a classic SMA + RSI strategy, and a **random-entry control** (500 runs with 
+the same stops, targets and costs but random entries). Rules were fixed 
+before the real data was run so there was no bias towards the specific 
+chart's price action.
 
 **Findings:**
 - **SMC (ICT model):** 355 trades, −0.08R per trade, exactly the median of the
@@ -25,8 +26,8 @@ bias towards the specific chart's price action.
   statistically clear loss. Most of it came from tight stops and costs;
   random entries with the same risk lost −0.31R.
 - **Buy-and-hold:** +76.9%, the highest return.
-- **SMA + RSI(2):** +25.7% with a similar Sharpe ratio to buy-and-hold (0.74
-  vs 0.69) and about a third of the drawdown.
+- **SMA + RSI(2):** +25.7% with a similar Sharpe ratio (risk free return) to
+  buy-and-hold (0.74 vs 0.69) and about a third of the drawdown.
 
 ![Account equity of each strategy, $100k start](docs/equity.png)
 
@@ -60,15 +61,14 @@ statistics are in [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md).
 | SMC: ICT model | Jan 2021 – Oct 2026 | 355 | −0.08 (−0.24 to +0.08) | −54.5% | −0.43 | −65.0% |
 | Order flow: Fabio model | Apr 2026 – Oct 2026 | 124 | −0.46 (−0.76 to −0.14) | −12.0% | −3.57 | −13.4% |
 
-- **R** is a trade's profit divided by the amount it risked. The 95%
+- **R** is the ratio of the trade's profit to the amount risked. The 95%
   confidence interval comes from 10,000 bootstrap resamples of the trades.
   An interval that includes zero means the sample can't tell an edge from luck.
 - Compare **Sharpe and average R**, not dollar returns. The SMC run risked 2%
   of equity per trade and the order-flow run 0.5%, so their returns are on
   different scales. Buy-and-hold and RSI(2) have no stop, so no R.
-- Order-flow data (every trade with its aggressor side) is much more
-  expensive than 1-minute bars, so that test covers 6.5 months instead of
-  5.8 years.
+- Order-flow data costs much more than candle data for SMC so that test covers
+  6.5 months instead of 5.8 years.
 
 ### Did the signals beat random entries?
 
